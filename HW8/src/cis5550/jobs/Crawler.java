@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.StringTokenizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -232,65 +233,84 @@ public class Crawler {
     return toReturn;
   }
 
-  private static boolean checkPermissions(byte[] hostRobotFile, String str) throws IOException {
-    InputStream is = new ByteArrayInputStream(hostRobotFile);
-    BufferedReader bfReader = new BufferedReader(new InputStreamReader(is));
-    String subLink = parseURL(str)[3];
-    boolean isFoundAgent = false;
-
-    String temp = bfReader.readLine();
-    while(temp != null){
-      if (temp.equals("User-agent: cis5550-crawler")) {
-        isFoundAgent = true;
-        temp = bfReader.readLine();
-        while (temp != null && temp.length() > 1) {
-          if (temp.contains("Disallow")) {
-            String disallowed = temp.split(" ")[1];
-            if (subLink.contains(disallowed)) {
-              return false;
-            }
-          } else if (temp.contains("Allow")) {
-            String allowed = temp.split(" ")[1];
-            if (subLink.contains(allowed)) {
-              return true;
-            }
-          }
-
-          temp = bfReader.readLine();
-        }
-      }
-      temp = bfReader.readLine();
-    }
-    if (!isFoundAgent) {
-      is = new ByteArrayInputStream(hostRobotFile);
-      bfReader = new BufferedReader(new InputStreamReader(is));
-      temp = bfReader.readLine();
-      while(temp != null){
-        if (temp.equals("User-agent: *")) {
-          isFoundAgent = true;
-          temp = bfReader.readLine();
-          while (temp != null && temp.length() > 1) {
-            if (temp.contains("Disallow")) {
-              String disallowed = temp.split(" ")[1];
-              if (subLink.contains(disallowed)) {
-                return false;
-              }
-            } else if (temp.contains("Allow")) {
-              String allowed = temp.split(" ")[1];
-              if (subLink.contains(allowed)) {
-                return true;
-              }
-            }
-
-            temp = bfReader.readLine();
-          }
-        }
-        temp = bfReader.readLine();
-      }
+  private static boolean robot(String content, String url) {
+    if ("".equals(content)) {
+      return false;
     }
 
+    final String PATTERNS_USERAGENT = "(?i)^User-agent:.*";
+    final String PATTERNS_DISALLOW = "(?i)Disallow:.*";
+    final String PATTERNS_ALLOW = "(?i)Allow:.*";
+    final int PATTERNS_USERAGENT_LENGTH = 11;
+    final int PATTERNS_DISALLOW_LENGTH = 9;
+    final int PATTERNS_ALLOW_LENGTH = 6;
 
-    return true;
+    boolean inMatchingUserAgent = false;
+    HashSet<String> allowSet = new HashSet<>();
+    HashSet<String> disallowSet = new HashSet<>();
+
+    StringTokenizer st = new StringTokenizer(content, "\n");
+    while (st.hasMoreTokens()) {
+      String line = st.nextToken();
+
+      if (line.length() == 0) {
+        continue;
+      }
+
+      if (line.matches(PATTERNS_USERAGENT)) {
+        String ua = line.substring(PATTERNS_USERAGENT_LENGTH).trim().toLowerCase();
+        if ("*".equals(ua) || "cis5550-crawler".equals(ua)) {
+          inMatchingUserAgent = true;
+        } else {
+          inMatchingUserAgent = false;
+        }
+      } else if (line.matches(PATTERNS_DISALLOW)) {
+        if (!inMatchingUserAgent) {
+          continue;
+        }
+        String path = line.substring(PATTERNS_DISALLOW_LENGTH).trim();
+        if (path.endsWith("*")) {
+          path = path.substring(0, path.length() - 1);
+        }
+        path = path.trim();
+        if (path.length() > 0) {
+          disallowSet.add(path);
+        }
+      } else if (line.matches(PATTERNS_ALLOW)) {
+        if (!inMatchingUserAgent) {
+          continue;
+        }
+        String path = line.substring(PATTERNS_ALLOW_LENGTH).trim();
+        if (path.endsWith("*")) {
+          path = path.substring(0, path.length() - 1);
+        }
+        path = path.trim();
+        allowSet.add(path);
+      }
+    }
+
+    int disallowSize = 0;
+    for (String s : disallowSet) {
+      if (url.startsWith(s) && (s.length() > disallowSize)) {
+        disallowSize = s.length();
+      }
+    }
+
+    if (disallowSize > 0) {
+      for (String s : allowSet) {
+        if (url.startsWith(s) && (s.length() > disallowSize)) {
+          return false;
+        }
+      }
+
+      return true;
+    } else {
+      return false;
+    }
+
+    // System.out.println(disallowSet);
+    // System.out.println(allowSet);
+
   }
 
   private static boolean checkRateLimit(byte[] hostRobotFile, String str, long lastAccessTime) throws IOException {
@@ -384,8 +404,9 @@ public class Crawler {
       }
       URL url = new URL(str);
 
+      String hostKey = parseURL(str)[1] + ":" + parseURL(str)[2];
       // Read Robots
-      byte[] hostRobot = client.get("hosts", parseURL(str)[1], "robots");
+      byte[] hostRobot = client.get("hosts", hostKey, "robots");
       if (hostRobot == null) {
         String[] parseURL = parseURL(str);
         String robotsURLstr = parseURL[0] + "://" + parseURL[1] + ":" + parseURL[2] + "/robots.txt";
@@ -395,20 +416,20 @@ public class Crawler {
         con.setRequestProperty("User-Agent", "cis5550-crawler");
 
         if (con.getResponseCode() == 200) {
-          Row newRow = new Row(parseURL(str)[1]);
+          Row newRow = new Row(hostKey);
           InputStream stream = con.getInputStream();
           byte[] input = stream.readAllBytes();
           newRow.put("robots", input);
           client.putRow("hosts", newRow);
         } else {
-          client.putRow("hosts", new Row(parseURL(str)[1]));
+          client.putRow("hosts", new Row(hostKey));
         }
       }
 
       // Check Robot Allowed or Disallowed
-      hostRobot = client.get("hosts", parseURL(str)[1], "robots");
-      boolean proceed = checkPermissions(hostRobot, str);
-      if (!proceed) {
+      hostRobot = client.get("hosts", parseURL(str)[1] + ":" + parseURL(str)[2], "robots");
+      boolean notProceed = robot(new String(hostRobot, "utf-8"), parseURL(str)[3]);
+      if (notProceed) {
         return list;
       }
 
