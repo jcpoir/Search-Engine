@@ -136,7 +136,7 @@ class Worker extends cis5550.generic.Worker {
         while (iterate.hasNext()) {
           Row row = iterate.next();
           for (String col : row.columns()) {
-            String outputIterable = lambda.op(row.get(col), accumulator);
+            String outputIterable = lambda.op(accumulator, row.get(col));
             accumulator = outputIterable;
           }
           client.put(newTable, row.key(), "foldcol", accumulator);
