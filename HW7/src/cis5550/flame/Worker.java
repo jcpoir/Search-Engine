@@ -135,7 +135,7 @@ class Worker extends cis5550.generic.Worker {
         while (iterate.hasNext()) {
           Row row = iterate.next();
           for (String col : row.columns()) {
-            String outputIterable = lambda.op(row.get(col), accumulator);
+            String outputIterable = lambda.op(accumulator, row.get(col));
             accumulator = outputIterable;
           }
           client.put(newTable, row.key(), "foldcol", accumulator);
@@ -360,7 +360,7 @@ class Worker extends cis5550.generic.Worker {
             FlamePair pair = iterator.next();
             String key = pair._1();
             String val = pair._2();
-            client.put(newTable, key, row.key(), val);
+            client.put(newTable, key, UUID.randomUUID().toString(), val);
           }
         }
       } catch (Exception e) {
@@ -549,13 +549,18 @@ class Worker extends cis5550.generic.Worker {
       try {
         TwoStringsToString lambda = (TwoStringsToString) Serializer.byteArrayToObject(request.bodyAsBytes(), myJAR);
         Iterator<Row> iterate = client.scan(oldTable, fromKey, toKey);
+        boolean isHasNext = false;
         while (iterate.hasNext()) {
+          isHasNext = true;
           Row row = iterate.next();
           for (String col : row.columns()) {
-            String outputIterable = lambda.op(row.get(col), accumulator);
+            String outputIterable = lambda.op(accumulator, row.get(col));
             accumulator = outputIterable;
             client.put(newTable, "fold", "fold", accumulator);
           }
+        }
+        if (!isHasNext) {
+          client.put(newTable, "fold", "fold", accumulator);
         }
       } catch (Exception e) {
         e.printStackTrace();
