@@ -395,6 +395,10 @@ public class Worker extends Thread {
     out.print(builder.toString());
     out.flush();
 
+    if (body == null) {
+      return;
+    }
+
     DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
     dataOutputStream.write(body, 0, body.length);
     dataOutputStream.flush();
