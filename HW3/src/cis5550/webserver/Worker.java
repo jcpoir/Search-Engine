@@ -181,6 +181,33 @@ public class Worker extends Thread {
     return "application/octet-stream";
   }
 
+  private static String getContentTypeDynamic(String requestString) {
+    String[] splitRequestString = requestString.split(" ");
+
+    if (splitRequestString.length == 3) {
+      String[] splitFileName = splitRequestString[1].split("\\.");
+      if (splitFileName.length == 1) {
+        return "text/html";
+      }
+
+      String fileExtension = splitFileName[1];
+
+      if (fileExtension.equals("jpg") || fileExtension.equals("jpeg")) {
+        return "image/jpeg";
+      }
+
+      if (fileExtension.equals("txt")) {
+        return "text/plain";
+      }
+
+      if (fileExtension.equals("html")) {
+        return "text/html";
+      }
+    }
+
+    return "text/html";
+  }
+
   private static Map<String, String> getParams(String splitPath, String filePath) {
     Map<String, String> params = new HashMap<>();
 
@@ -413,7 +440,7 @@ public class Worker extends Thread {
   }
 
   private static void sendDynamicContent(ArrayList<String> lines, Socket socket, Map<String, Route> table,
-      StringBuilder messageBuilder, String splitPath) throws IOException {
+      ArrayList<Byte> messageBuilder, String splitPath) throws IOException {
     String method = getRequestType(lines.get(0));
     String url = getFilePath(lines.get(0));
     String protocol = getProtocol(lines.get(0));
@@ -422,15 +449,24 @@ public class Worker extends Thread {
     Map<String, String> params = getParams(splitPath, getFilePath(lines.get(0)));
     Map<String, String> queryParams = getQueryParams(getFilePathWithQueryParams(lines.get(0)));
     String clientSessionId = getClientSessionId(lines);
-    if (getContentType(lines.get(0)).equals("application/x-www-form-urlencoded")) {
-      String queries = messageBuilder.toString();
+
+    // BUG FIX: Step 9 HW2 Content Type, type() test, bodyAsBytes() test
+    // (ASK WHAT TO DO IF NO CONTENT TYPE SPECIFIED)
+    byte[] byteArray = new byte[messageBuilder.size()];
+    for (int i = 0; i < byteArray.length; i++) {
+      byteArray[i] = messageBuilder.get(i);
+    }
+
+    if (headers.get("content-type") != null
+        && headers.get("content-type").equals("application/x-www-form-urlencoded")) {
+      String queries = new String(byteArray);
       queryParams = getQueryParamsBody(queryParams, queries);
     }
 
     Route route = table.get(splitPath);
     RequestImpl request = new RequestImpl(method, url, protocol, headers,
         queryParams, params,
-        inetSocketAddress, messageBuilder.toString().getBytes(), server);
+        inetSocketAddress, byteArray, server);
 
     if (clientSessionId != null) {
       SessionImpl retrieveSession = (SessionImpl) sessionsMap.get(clientSessionId);
@@ -456,7 +492,7 @@ public class Worker extends Thread {
         response.header("Content-Length", Integer.toString(handleCall.toString().length()));
         response.header("Server", getHost(lines));
         if (!response.getHeaders().containsKey("Content-Type")) {
-          response.header("Content-Type", "text/html");
+          response.type(getContentTypeDynamic(lines.get(0)));
         }
         if (request.session != null && !sessionsMap.containsKey(request.session.id())) {
           sessionsMap.put(request.session.id(), request.session);
@@ -474,7 +510,7 @@ public class Worker extends Thread {
         response.header("Content-Length", Integer.toString(0));
         response.header("Server", getHost(lines));
         if (!response.getHeaders().containsKey("Content-Type")) {
-          response.header("Content-Type", "text/html");
+          response.type(getContentTypeDynamic(lines.get(0)));
         }
         if (request.session != null && !sessionsMap.containsKey(request.session.id())) {
           sessionsMap.put(request.session.id(), request.session);
@@ -490,7 +526,7 @@ public class Worker extends Thread {
       } else if (!response.getIsWriteCalled() && handleCall == null) {
         response.header("Server", getHost(lines));
         if (!response.getHeaders().containsKey("Content-Type")) {
-          response.header("Content-Type", "text/html");
+          response.type(getContentTypeDynamic(lines.get(0)));
         }
         if (request.session != null && !sessionsMap.containsKey(request.session.id())) {
           sessionsMap.put(request.session.id(), request.session);
@@ -513,7 +549,7 @@ public class Worker extends Thread {
         response.header("Content-Length", Integer.toString(0));
         response.header("Server", getHost(lines));
         if (!response.getHeaders().containsKey("Content-Type")) {
-          response.header("Content-Type", "text/html");
+          response.type(getContentTypeDynamic(lines.get(0)));
         }
         if (request.session != null && !sessionsMap.containsKey(request.session().id())) {
           sessionsMap.put(request.session().id(), request.session());
@@ -672,7 +708,7 @@ public class Worker extends Thread {
         String line;
         String responseCode = null;
         int contentLength = 0;
-        StringBuilder messageBuilder = new StringBuilder();
+        ArrayList<Byte> messageBuilder = new ArrayList<>();
         int counter = 0;
 
         while (!socket.isClosed() && ((nRead = input.read()) != -1)) {
@@ -723,12 +759,12 @@ public class Worker extends Thread {
               buffer = new ByteArrayOutputStream();
               lines = new ArrayList<>();
               encounteredCRLF = false;
-              messageBuilder = new StringBuilder();
+              messageBuilder = new ArrayList<>();
               counter = 0;
             }
           } else if (encounteredCRLF) {
             // READING MESSAGE BODY
-            messageBuilder.append((char) bytes[bytes.length - 1]);
+            messageBuilder.add(bytes[bytes.length - 1]);
             counter += 1;
 
             // MESSAGE BODY FINISHED READING
@@ -763,7 +799,7 @@ public class Worker extends Thread {
               buffer = new ByteArrayOutputStream();
               lines = new ArrayList<>();
               encounteredCRLF = false;
-              messageBuilder = new StringBuilder();
+              messageBuilder = new ArrayList<>();
               counter = 0;
             }
           }
