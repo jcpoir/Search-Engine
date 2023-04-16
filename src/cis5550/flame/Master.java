@@ -41,7 +41,9 @@ class Master extends cis5550.generic.Master {
 
     get("/", (request, response) -> {
       response.type("text/html");
-      return "<html><head><title>Flame Master</title></head><body><h3>Flame Master</h3>\n" + clientTable()
+      //return "<html><head><title>Flame Master</title></head><body><h3>Flame Master</h3>\n" + clientTable()
+      //    + "</body></html>";
+	  return "<html><head><title>Flame Master</title></head><body><h3>Flame Master</h3>\n"
           + "</body></html>";
     });
 
@@ -75,8 +77,9 @@ class Master extends cis5550.generic.Master {
 
       Thread threads[] = new Thread[getWorkers().size()];
       String results[] = new String[getWorkers().size()];
+	  Vector<String> vWorkers = (Vector<String>) getWorkers();
       for (int i = 0; i < getWorkers().size(); i++) {
-        final String url = "http://" + getWorkers().elementAt(i) + "/useJAR";
+        final String url = "http://" + vWorkers.elementAt(i) + "/useJAR";
         final int j = i;
         threads[i] = new Thread("JAR upload #" + (i + 1)) {
           public void run() {
