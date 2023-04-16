@@ -75,18 +75,24 @@ class Master extends cis5550.generic.Master {
       // parallel, so we'll use a separate
       // thread for each upload.
 
+	 logger.debug("got here2");
       Thread threads[] = new Thread[getWorkers().size()];
+	  logger.debug("got here2a");
       String results[] = new String[getWorkers().size()];
+	  logger.debug("got here2b");
 	  Vector<String> vWorkers = (Vector<String>) getWorkers();
+	  logger.debug("Number workers: " + vWorkers.size());
       for (int i = 0; i < getWorkers().size(); i++) {
         final String url = "http://" + vWorkers.elementAt(i) + "/useJAR";
         final int j = i;
+		 logger.debug("got here3");
         threads[i] = new Thread("JAR upload #" + (i + 1)) {
           public void run() {
             try {
               results[j] = new String(HTTP.doRequest("POST", url, request.bodyAsBytes()).body());
             } catch (Exception e) {
               results[j] = "Exception: " + e;
+			  logger.warn("Exception: " + e);
               e.printStackTrace();
             }
           }
@@ -100,6 +106,7 @@ class Master extends cis5550.generic.Master {
         try {
           threads[i].join();
         } catch (InterruptedException ie) {
+			logger.debug("Interrupted");
         }
       }
 

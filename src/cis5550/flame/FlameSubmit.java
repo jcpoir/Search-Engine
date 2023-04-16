@@ -44,7 +44,14 @@ public class FlameSubmit {
       return result;
     } catch (IOException ioe) {
       responseCode = con.getResponseCode();
-      BufferedReader r = new BufferedReader(new InputStreamReader(con.getErrorStream()));
+		InputStream is = con.getErrorStream();
+		ioe.printStackTrace();
+		if (is == null) {
+			System.out.println("Error connecting to " + u);
+			return null;
+		}
+	  InputStreamReader isr = new InputStreamReader(is);
+      BufferedReader r = new BufferedReader(isr);
       errorResponse = "";
       while (true) {
         String s = r.readLine();

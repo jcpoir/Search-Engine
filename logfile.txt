@@ -1,0 +1,20 @@
+2023-04-16 19:35:45.606 main  Flame master (v1.5 Jan 1 2023) starting on port 9000
+2023-04-16 19:35:49.003 Thread-2New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:37:14.924 Thread-19New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:39:25.229 Thread-46New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:39:32.394 Thread-49New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:40:17.397 main  Flame master (v1.5 Jan 1 2023) starting on port 9000
+2023-04-16 19:40:22.962 Thread-2New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:40:22.962 Thread-2  got here
+2023-04-16 19:41:22.106 main  Flame master (v1.5 Jan 1 2023) starting on port 9000
+2023-04-16 19:41:27.800 Thread-2New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:41:27.801 Thread-2  got here
+2023-04-16 19:41:27.802 Thread-2  got here2
+2023-04-16 19:42:22.596 main  Flame master (v1.5 Jan 1 2023) starting on port 9000
+2023-04-16 19:42:29.516 Thread-2New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:42:29.518 Thread-2  got here2
+2023-04-16 19:43:02.372 main  Flame master (v1.5 Jan 1 2023) starting on port 9000
+2023-04-16 19:43:05.380 Thread-2New job submitted; main class is cis5550.jobs.Crawler
+2023-04-16 19:43:05.381 Thread-2  got here2
+2023-04-16 19:43:05.382 Thread-2  got here2a
+2023-04-16 19:43:05.382 Thread-2  got here2b
