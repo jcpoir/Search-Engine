@@ -70,7 +70,7 @@ public class FlameContextImpl implements FlameContext{
     partitioner.addKVSWorker(client.getWorkerAddress(lastWorkerIndex), null, client.getWorkerID(0));
     partitioner.addKVSWorker(client.getWorkerAddress(lastWorkerIndex), client.getWorkerID(lastWorkerIndex), null);
 
-    Vector<String> flameWorkers = cis5550.generic.Master.getWorkers();
+    Vector<String> flameWorkers = (Vector<String>) cis5550.generic.Master.getWorkers();
     for (String str : flameWorkers) {
       partitioner.addFlameWorker(str);
     }
