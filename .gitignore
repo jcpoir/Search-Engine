@@ -7,4 +7,5 @@
 .idea
 *.iml
 *log.properties
+logfile.txt
 *someLogFile
