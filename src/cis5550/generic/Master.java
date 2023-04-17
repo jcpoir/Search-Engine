@@ -3,6 +3,7 @@ package cis5550.generic;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 
 import cis5550.webserver.Server;
@@ -11,8 +12,8 @@ public class Master {
   protected static Map<String, String> workers = new ConcurrentHashMap<>();
   protected static Map<String, Long> pingTimes = new ConcurrentHashMap<>();
 
-  public static List<String> getWorkers() {
-    return new ArrayList<>(workers.values());
+  public static Vector<String> getWorkers() {
+    return new Vector<>(workers.values());
   }
 
   public static String workerTable() {
