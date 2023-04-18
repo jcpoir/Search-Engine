@@ -22,39 +22,28 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.concurrent.BlockingQueue;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SNIHostName;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSocketFactory;
-
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.security.KeyStore;
 
 import cis5550.tools.Logger;
-import cis5550.tools.SNIInspector;
 
 public class Worker extends Thread {
-  private static BlockingQueue<Socket> queue;
-  private static Map<String, String> hostToDirectoryMap;
-  private static Map<String, String> hostKeyFileMap;
-  private static Map<String, String> hostPasswordMap;
-  private static Map<String, Map<String, Map<String, Route>>> hostMap;
+  private BlockingQueue<Socket> queue;
+  private String directory;
+  private Map<String, Map<String, Route>> routingTable;
   private static Server server;
-  private static Map<String, Session> sessionsMap;
-  private static int portNumberSecure;
+
   private static final Logger logger = Logger.getLogger(Worker.class);
 
   private static String parseRequest(ArrayList<String> lines) {
     boolean containsHost = false;
     String requestString = lines.get(0);
-
-    HashSet<String> responseCodes = new HashSet<>() {
+    HashSet<String> acceptableRequests = new HashSet<>() {
       {
         add("GET");
-        add("HEAD");
         add("POST");
         add("PUT");
+        add("HEAD");
       }
     };
 
@@ -75,7 +64,11 @@ public class Worker extends Thread {
       return "505 HTTP Version Not Supported";
     }
 
-    if (!responseCodes.contains(splitRequestString[0])) {
+    if (splitRequestString[0].equals("POST") || splitRequestString[0].equals("PUT")) {
+      return "405 Not Allowed";
+    }
+
+    if (!splitRequestString[0].equals("GET") && !splitRequestString[0].equals("HEAD")) {
       return "501 Not Implemented";
     }
 
@@ -261,46 +254,6 @@ public class Worker extends Thread {
     return map;
   }
 
-  private static String getHost(ArrayList<String> lines) {
-    String host = "localhost";
-
-    for (String header : lines.subList(1, lines.size())) {
-      String[] splitted = header.split(" ");
-      if (splitted.length == 2 && splitted[0].toLowerCase().equals("host:")) {
-        host = splitted[1].split("\\:")[0];
-      }
-    }
-
-    return host;
-  }
-
-  private static String getClientSessionId(ArrayList<String> lines) {
-    String host = null;
-
-    for (String header : lines.subList(1, lines.size())) {
-      String[] splitted = header.split(" ");
-      if (splitted.length == 2 && splitted[0].toLowerCase().equals("cookie:")) {
-        String[] cookies = splitted[1].split("; ");
-        for (String cookie : cookies) {
-          if (cookie.split("\\=")[0].equals("SessionID")) {
-            host = cookie.split("\\=")[1];
-          }
-        }
-      }
-
-      if (host == null) {
-        continue;
-      }
-
-      if (sessionsMap.containsKey(host)) {
-        break;
-      }
-      host = null;
-    }
-
-    return host;
-  }
-
   private static String checkFilePath(String filePath, ArrayList<String> lines) throws ParseException {
     if (filePath.contains("..")) {
       return "403 Forbidden";
@@ -314,14 +267,6 @@ public class Worker extends Thread {
 
     if (!file.canRead()) {
       return "403 Forbidden";
-    }
-
-    // EXTRA CREDIT NO 2
-    long lastDownloadedTime = getLastDownloadedTime(lines);
-    long fileLastModified = file.lastModified();
-
-    if (lastDownloadedTime >= fileLastModified) {
-      return "304 Not Modified";
     }
 
     return "200 OK";
@@ -339,6 +284,11 @@ public class Worker extends Thread {
     for (String key : keys) {
       boolean isMatch = true;
       String[] splitted = key.split("/");
+
+      if (splitFilePath.length != splitted.length) {
+        continue;
+      }
+
       for (int i = 1; i < splitted.length; i++) {
         if (splitted[i].charAt(0) == ':') {
           continue;
@@ -434,9 +384,11 @@ public class Worker extends Thread {
     out.print(builder.toString());
     out.flush();
 
-    DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
-    dataOutputStream.write(body, 0, body.length);
-    dataOutputStream.flush();
+    if (body != null) {
+      DataOutputStream dataOutputStream = new DataOutputStream(outputStream);
+      dataOutputStream.write(body, 0, body.length);
+      dataOutputStream.flush();
+    }
   }
 
   private static void sendDynamicContent(ArrayList<String> lines, Socket socket, Map<String, Route> table,
@@ -448,7 +400,6 @@ public class Worker extends Thread {
     Map<String, String> headers = getHeaders(lines);
     Map<String, String> params = getParams(splitPath, getFilePath(lines.get(0)));
     Map<String, String> queryParams = getQueryParams(getFilePathWithQueryParams(lines.get(0)));
-    String clientSessionId = getClientSessionId(lines);
 
     // BUG FIX: Step 9 HW2 Content Type, type() test, bodyAsBytes() test
     // (ASK WHAT TO DO IF NO CONTENT TYPE SPECIFIED)
@@ -468,17 +419,6 @@ public class Worker extends Thread {
         queryParams, params,
         inetSocketAddress, byteArray, server);
 
-    if (clientSessionId != null) {
-      SessionImpl retrieveSession = (SessionImpl) sessionsMap.get(clientSessionId);
-      if (retrieveSession.getIsSessionExpired() || 
-        (System.currentTimeMillis() - retrieveSession.lastAccessedTime()) > (retrieveSession.getMaxActiveInterval() * 1000)) {
-          retrieveSession.invalidate();
-      } else {
-        retrieveSession.updateLastAccessedTime();
-        request.setExistingSession(retrieveSession);
-      }
-    }
-
     ResponseImpl response = new ResponseImpl(socket.getOutputStream());
 
     try {
@@ -490,17 +430,9 @@ public class Worker extends Thread {
 
       if (!response.getIsWriteCalled() && handleCall != null) {
         response.header("Content-Length", Integer.toString(handleCall.toString().length()));
-        response.header("Server", getHost(lines));
+        response.header("Server", "localhost");
         if (!response.getHeaders().containsKey("Content-Type")) {
           response.type(getContentTypeDynamic(lines.get(0)));
-        }
-        if (request.session != null && !sessionsMap.containsKey(request.session.id())) {
-          sessionsMap.put(request.session.id(), request.session);
-          String responseHeader = "SessionID=" + request.session.id() + "; SameSite=Strict; HttpOnly";
-          if (socket.getLocalPort() == portNumberSecure) {
-            responseHeader += "; Secure";
-          }
-          response.header("Set-Cookie", responseHeader);
         }
         response.body(handleCall.toString());
 
@@ -508,35 +440,14 @@ public class Worker extends Thread {
             response.getBody());
       } else if (!response.getIsWriteCalled() && handleCall == null && response.getBody() == null) {
         response.header("Content-Length", Integer.toString(0));
-        response.header("Server", getHost(lines));
+        response.header("Server", "localhost");
         if (!response.getHeaders().containsKey("Content-Type")) {
           response.type(getContentTypeDynamic(lines.get(0)));
-        }
-        if (request.session != null && !sessionsMap.containsKey(request.session.id())) {
-          sessionsMap.put(request.session.id(), request.session);
-          String responseHeader = "SessionID=" + request.session.id() + "; SameSite=Strict; HttpOnly";
-          if (socket.getLocalPort() == portNumberSecure) {
-            responseHeader += "; Secure";
-          }
-          response.header("Set-Cookie", responseHeader);
         }
 
         sendDynamicResponse(socket.getOutputStream(), response.getStatusCode(), response.getHeaders(),
             response.getBody());
       } else if (!response.getIsWriteCalled() && handleCall == null) {
-        response.header("Server", getHost(lines));
-        if (!response.getHeaders().containsKey("Content-Type")) {
-          response.type(getContentTypeDynamic(lines.get(0)));
-        }
-        if (request.session != null && !sessionsMap.containsKey(request.session.id())) {
-          sessionsMap.put(request.session.id(), request.session);
-          String responseHeader = "SessionID=" + request.session.id() + "; SameSite=Strict; HttpOnly";
-          if (socket.getLocalPort() == portNumberSecure) {
-            responseHeader += "; Secure";
-          }
-          response.header("Set-Cookie", responseHeader);
-        }
-
         sendDynamicResponse(socket.getOutputStream(), response.getStatusCode(), response.getHeaders(),
             response.getBody());
       }
@@ -547,17 +458,9 @@ public class Worker extends Thread {
       } else {
         response.status(500, "Internal Server Error");
         response.header("Content-Length", Integer.toString(0));
-        response.header("Server", getHost(lines));
+        response.header("Server", "localhost");
         if (!response.getHeaders().containsKey("Content-Type")) {
           response.type(getContentTypeDynamic(lines.get(0)));
-        }
-        if (request.session != null && !sessionsMap.containsKey(request.session().id())) {
-          sessionsMap.put(request.session().id(), request.session());
-          String responseHeader = "SessionID=" + request.session.id() + "; SameSite=Strict; HttpOnly";
-          if (socket.getLocalPort() == portNumberSecure) {
-            responseHeader += "; Secure";
-          }
-          response.header("Set-Cookie", responseHeader);
         }
 
         sendDynamicResponse(socket.getOutputStream(), response.getStatusCode(), response.getHeaders(),
@@ -652,18 +555,12 @@ public class Worker extends Thread {
     return total;
   }
 
-  public Worker(BlockingQueue<Socket> queue, Map<String, String> hostToDirectoryMap,
-      Map<String, Map<String, Map<String, Route>>> hostMap, Server server, 
-      Map<String, Session> sessionsMap, int portNumberSecure, 
-      Map<String, String> hostKeyFileMap, Map<String, String> hostPasswordMap) {
-    Worker.queue = queue;
-    Worker.hostToDirectoryMap = hostToDirectoryMap;
-    Worker.hostMap = hostMap;
-    Worker.server = server;
-    Worker.sessionsMap = sessionsMap;
-    Worker.portNumberSecure = portNumberSecure;
-    Worker.hostKeyFileMap = hostKeyFileMap;
-    Worker.hostPasswordMap = hostPasswordMap;
+  public Worker(BlockingQueue<Socket> queue, String directory, Map<String, Map<String, Route>> routingTable,
+      Server server) {
+    this.queue = queue;
+    this.directory = directory;
+    this.routingTable = routingTable;
+    Server.server = server;
   }
 
   @Override
@@ -671,31 +568,6 @@ public class Worker extends Thread {
     while (true) {
       try {
         Socket socket = queue.take();
-
-        if (socket.getLocalPort() == portNumberSecure) {
-          SNIInspector inspector = new SNIInspector();
-          inspector.parseConnection(socket);
-          SNIHostName retriveHostName = inspector.getHostName();
-          String pwd = "secret";
-          if (retriveHostName != null && !retriveHostName.getAsciiName().equals("localhost")
-              && !hostMap.containsKey(retriveHostName.getAsciiName())) {
-            pwd = hostPasswordMap.get(retriveHostName.getAsciiName());
-          }
-          KeyStore keyStore = KeyStore.getInstance("JKS");
-          String keyFilePath = "keystore.jks";
-          if (retriveHostName != null && !retriveHostName.getAsciiName().equals("localhost")
-              && !hostMap.containsKey(retriveHostName.getAsciiName())) {
-            keyFilePath = hostKeyFileMap.get(retriveHostName.getAsciiName());
-          }
-          keyStore.load(new FileInputStream(keyFilePath), pwd.toCharArray());
-          KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance("SunX509");
-          keyManagerFactory.init(keyStore, pwd.toCharArray());
-          SSLContext sslContext = SSLContext.getInstance("TLS");
-          sslContext.init(keyManagerFactory.getKeyManagers(), null, null);
-          SSLSocketFactory factory = sslContext.getSocketFactory();
-          socket = factory.createSocket(socket, (InputStream) inspector.getInputStream(), true);
-        }
-
         InputStream input = socket.getInputStream();
 
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -729,12 +601,7 @@ public class Worker extends Thread {
 
             // NO MESSAGE BODY
             if (contentLength == 0) {
-              Map<String, Map<String, Route>> hostRoutingTable = hostMap.get(getHost(lines));
-              if (hostRoutingTable == null) {
-                hostMap.put(getHost(lines), new HashMap<>());
-                hostRoutingTable = hostMap.get(getHost(lines));
-              }
-              Map<String, Route> table = hostRoutingTable.get(getRequestType(lines.get(0)));
+              Map<String, Route> table = routingTable.get(getRequestType(lines.get(0)));
 
               if (table == null || !(table.containsKey(getFilePath(lines.get(0))))) {
                 // PERFORM PATH MATCHING LOOKUP
@@ -743,10 +610,6 @@ public class Worker extends Thread {
                   sendDynamicContent(lines, socket, table, messageBuilder, lookup);
                 } else {
                   // SEND STATIC FILES
-                  String directory = hostToDirectoryMap.get(getHost(lines));
-                  if (directory == null) {
-                    directory = "";
-                  }
                   String filePath = directory + "/" + getFilePath(lines.get(0));
                   sendStaticResponse(filePath, responseCode, socket, lines);
                 }
@@ -769,12 +632,7 @@ public class Worker extends Thread {
 
             // MESSAGE BODY FINISHED READING
             if (counter == contentLength) {
-              Map<String, Map<String, Route>> hostRoutingTable = hostMap.get(getHost(lines));
-              if (hostRoutingTable == null) {
-                hostMap.put(getHost(lines), new HashMap<>());
-                hostRoutingTable = hostMap.get(getHost(lines));
-              }
-              Map<String, Route> table = hostRoutingTable.get(getRequestType(lines.get(0)));
+              Map<String, Route> table = routingTable.get(getRequestType(lines.get(0)));
 
               if (table == null || !(table.containsKey(getFilePath(lines.get(0))))) {
                 // PERFORM PATH MATCHING LOOKUP
@@ -783,10 +641,6 @@ public class Worker extends Thread {
                   sendDynamicContent(lines, socket, table, messageBuilder, lookup);
                 } else {
                   // SEND STATIC FILES
-                  String directory = hostToDirectoryMap.get(getHost(lines));
-                  if (directory == null) {
-                    directory = "";
-                  }
                   String filePath = directory + "/" + getFilePath(lines.get(0));
                   sendStaticResponse(filePath, responseCode, socket, lines);
                 }

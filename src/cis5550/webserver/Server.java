@@ -1,12 +1,10 @@
 package cis5550.webserver;
 
-import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import cis5550.tools.Logger;
@@ -19,22 +17,16 @@ public class Server {
   public static Server server = null;
   public static boolean flag = false;
   private static int portNumber = 80;
-  private static int portNumberSecure;
+  private static String directory = null;
 
-  // Default host if no host is specified in any of calls below 
-  private static String curHost = "localhost";
-  private static Map<String, String> hostToDirectoryMap = new HashMap<>();
-  private static Map<String, String> hostKeyFileMap = new HashMap<>();
-  private static Map<String, String> hostPasswordMap = new HashMap<>();
-  private static Map<String, Map<String, Map<String, Route>>> hostMap = new HashMap<>();
-  private static Map<String, Session> sessions = new ConcurrentHashMap<>();
+  private static Map<String, Map<String, Route>> routingTable = new HashMap<>();
 
   public static class staticFiles {
     public static void location(String s) {
       if (server == null) {
         server = new Server();
       }
-      hostToDirectoryMap.put(curHost, s);
+      directory = s;
       if (!flag) {
         flag = true;
         Thread thread = new Thread(() -> {
@@ -50,10 +42,6 @@ public class Server {
       server = new Server();
     }
 
-    if (!hostMap.containsKey(curHost)) {
-      hostMap.put(curHost, new HashMap<>());
-    }
-    Map<String, Map<String, Route>> routingTable = hostMap.get(curHost);
     if (!routingTable.containsKey("GET")) {
       routingTable.put("GET", new HashMap<>());
     }
@@ -73,10 +61,6 @@ public class Server {
       server = new Server();
     }
 
-    if (!hostMap.containsKey(curHost)) {
-      hostMap.put(curHost, new HashMap<>());
-    }
-    Map<String, Map<String, Route>> routingTable = hostMap.get(curHost);
     if (!routingTable.containsKey("POST")) {
       routingTable.put("POST", new HashMap<>());
     }
@@ -96,10 +80,6 @@ public class Server {
       server = new Server();
     }
 
-    if (!hostMap.containsKey(curHost)) {
-      hostMap.put(curHost, new HashMap<>());
-    }
-    Map<String, Map<String, Route>> routingTable = hostMap.get(curHost);
     if (!routingTable.containsKey("PUT")) {
       routingTable.put("PUT", new HashMap<>());
     }
@@ -121,75 +101,23 @@ public class Server {
     portNumber = num;
   }
 
-  public static void securePort(int num) {
-    if (server == null) {
-      server = new Server();
-    }
-    portNumberSecure = num;
-  }
-  
-  public static void host(String h, String keyPath, String password) {
-    curHost = h;
-
-    if (!hostMap.containsKey(curHost)) {
-      hostMap.put(curHost, new HashMap<>());
-      hostKeyFileMap.put(curHost, keyPath);
-      hostKeyFileMap.put(curHost, password);
-    }
-  }
-
-  public static void serverLoop(ServerSocket s, BlockingQueue<Socket> queue) throws IOException, InterruptedException {
-    while (true) {
-      Socket socket = s.accept();
-      queue.put(socket);
-    }
-  }
-
   public void run() {
     BlockingQueue<Socket> queue = new LinkedBlockingQueue<>();
 
     try {
-      ServerSocket serverSocketTLS = new ServerSocket(portNumberSecure);
       ServerSocket serverSocket = new ServerSocket(portNumber);
 
       for (int i = 0; i < NUM_WORKERS; i++) {
-        Worker worker = new Worker(queue, hostToDirectoryMap, hostMap, server, sessions, portNumberSecure, hostKeyFileMap, hostPasswordMap);
+        Worker worker = new Worker(queue, directory, routingTable, server);
         worker.start();
       }
 
-      Thread nonSecure = new Thread(() -> {
-        try {
-          serverLoop(serverSocket, queue);
-        } catch (IOException | InterruptedException e) {
-          e.printStackTrace();
-        }
-      });
-      Thread secure = new Thread(() -> {
-        try {
-          serverLoop(serverSocketTLS, queue);
-        } catch (IOException | InterruptedException e) {
-          e.printStackTrace();
-        }
-      });
-      Thread removeExpiredSessions = new Thread(() -> {
-        try {
-          for (Map.Entry<String, Session> pair : sessions.entrySet()) {
-            SessionImpl impl = (SessionImpl) pair.getValue();
-            if (impl.getIsSessionExpired() || 
-              (System.currentTimeMillis() - impl.lastAccessedTime()) > (impl.getMaxActiveInterval() * 1000)) {
-                sessions.remove(pair.getKey());
-            }
-          }
+      while (true) {
+        Socket socket = serverSocket.accept();
+        logger.info("Connection accepted!");
 
-          Thread.sleep(4000);
-        } catch (InterruptedException e) {
-          e.printStackTrace();
-        }
-      });
-
-      nonSecure.start();
-      secure.start();
-      removeExpiredSessions.start();
+        queue.put(socket);
+      }
 
     } catch (Exception e) {
       e.printStackTrace();

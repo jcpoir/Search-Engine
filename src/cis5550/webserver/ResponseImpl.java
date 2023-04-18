@@ -104,23 +104,6 @@ public class ResponseImpl implements Response{
     this.dataOutputStream.flush();
   }
 
-  private void sendRedirectResponse(String responseCode,
-      Map<String, ArrayList<String>> headers) {
-    PrintWriter out = new PrintWriter(outputStream, true);
-    String initialResponse = "HTTP/1.1 " + responseCode + "\r\n";
-    StringBuilder builder = new StringBuilder(initialResponse);
-    for (Map.Entry<String, ArrayList<String>> entry : headers.entrySet()) {
-      String header = entry.getKey().toUpperCase();
-      for (String value : entry.getValue()) {
-        builder.append(header + ": " + value + "\r\n");
-      }
-    }
-
-    builder.append("\r\n");
-    out.print(builder.toString());
-    out.flush();
-  }
-
   @Override
   public void write(byte[] b) throws Exception {    
     if (!isWriteCalled) {
@@ -138,31 +121,12 @@ public class ResponseImpl implements Response{
 
   @Override
   public void redirect(String url, int responseCode) {
-    HashMap<Integer, String> responseCodes = new HashMap<>() {
-      {
-        put(301, "Moved Permanently");
-        put(302, "Found");
-        put(303, "See Other");
-        put(307, "Temporary Redirect");
-        put(308, "Permanent Redirect");
-      }
-    };    
-    
-    if (isWriteCalled || !responseCodes.containsKey(responseCode)) {
-      return;
-    }
-
-    this.header("Connection", "close");
-    this.header("Location", url);
-    this.status(responseCode, responseCodes.get(responseCode));
-    sendRedirectResponse(statusCode, headers);
-    isWriteCalled = true;
+    // TODO Auto-generated method stub
   }
 
   @Override
   public void halt(int statusCode, String reasonPhrase) {
     // TODO Auto-generated method stub
-    
   }
   
 }

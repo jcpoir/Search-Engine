@@ -158,7 +158,7 @@ public class Worker extends cis5550.generic.Worker {
 
     String storageDirectory = args[1];
     String address = args[2];
-    startPingThread(portNum, storageDirectory, address);
+    startPingThread(address, storageDirectory, portNum);
 
     loadPersistentTables(storageDirectory);
 
@@ -209,6 +209,7 @@ public class Worker extends cis5550.generic.Worker {
 
       Row getRow = getRow(tableName, row, storageDirectory);
       byte[] retrieveItem = getRow.getBytes(col);
+      res.header("Content-Length", Integer.toString(retrieveItem.length));
       res.bodyAsBytes(retrieveItem);
 
       res.status(200, "OK");
@@ -269,6 +270,7 @@ public class Worker extends cis5550.generic.Worker {
     
       Row getRow = getRow(tableName, row, storageDirectory);
       res.type("text/plain");
+      res.header("Content-Length", Integer.toString(getRow.toByteArray().length));
       res.bodyAsBytes((getRow.toByteArray()));
 
       return null;
@@ -375,6 +377,7 @@ public class Worker extends cis5550.generic.Worker {
       }
 
       res.type("text/plain");
+      res.header("Content-Length", Integer.toString(Integer.toString(map.get(tableName).size()).length()));
       res.body(Integer.toString(map.get(tableName).size()));
 
       return null;
