@@ -590,7 +590,8 @@ public class Worker extends Thread {
           // ENCOUNTERED DOUBLE CRLF
           if (bytes.length > 4 && bytes[bytes.length - 4] == 13 && bytes[bytes.length - 3] == 10
               && bytes[bytes.length - 2] == 13
-              && bytes[bytes.length - 1] == 10) {
+              && bytes[bytes.length - 1] == 10
+              && !encounteredCRLF ) {
             encounteredCRLF = true;
             reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes)));
             while ((line = reader.readLine()) != null && line.length() > 0) {

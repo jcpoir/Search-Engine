@@ -41,7 +41,7 @@ class Master extends cis5550.generic.Master {
 
     get("/", (request, response) -> {
       response.type("text/html");
-      return "<html><head><title>Flame Master</title></head><body><h3>Flame Master</h3>\n" + clientTable()
+      return "<html><head><title>Flame Master</title></head><body><h3>Flame Master</h3>\n" // + clientTable()
           + "</body></html>";
     });
 
@@ -73,10 +73,11 @@ class Master extends cis5550.generic.Master {
       // parallel, so we'll use a separate
       // thread for each upload.
 
-      Thread threads[] = new Thread[getWorkers().size()];
-      String results[] = new String[getWorkers().size()];
-      for (int i = 0; i < getWorkers().size(); i++) {
-        final String url = "http://" + getWorkers().elementAt(i) + "/useJAR";
+      Vector<String> workers = new Vector<>(getWorkers());
+      Thread threads[] = new Thread[workers.size()];
+      String results[] = new String[workers.size()];
+      for (int i = 0; i < workers.size(); i++) {
+        final String url = "http://" + workers.elementAt(i) + "/useJAR";
         final int j = i;
         threads[i] = new Thread("JAR upload #" + (i + 1)) {
           public void run() {

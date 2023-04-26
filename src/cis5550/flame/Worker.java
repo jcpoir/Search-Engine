@@ -13,8 +13,14 @@ import cis5550.flame.FlamePairRDD.*;
 import cis5550.flame.FlameRDD.*;
 import cis5550.kvs.*;
 import cis5550.tools.Serializer;
+import cis5550.tools.Logger;
 
 class Worker extends cis5550.generic.Worker {
+  private static final Logger logger = Logger.getLogger(Worker.class);
+
+  private static void print(String str) {
+    logger.info(str);
+  }
 
   public static void main(String args[]) {
     if (args.length != 2) {
@@ -295,7 +301,7 @@ class Worker extends cis5550.generic.Worker {
 
       return "OK";
     });
-  
+
     post("/rdd/fromTable", (request, response) -> {
       String oldTable = request.queryParams("oldtable");
       String newTable = request.queryParams("newtable");
@@ -329,7 +335,7 @@ class Worker extends cis5550.generic.Worker {
 
       return "OK";
     });
-  
+
     post("/rdd/flatMapToPair", (request, response) -> {
       String oldTable = request.queryParams("oldtable");
       String newTable = request.queryParams("newtable");
@@ -370,7 +376,7 @@ class Worker extends cis5550.generic.Worker {
 
       return "OK";
     });
-  
+
     post("/rdd/pairFlatMapToPair", (request, response) -> {
       String oldTable = request.queryParams("oldtable");
       String newTable = request.queryParams("newtable");
@@ -393,7 +399,8 @@ class Worker extends cis5550.generic.Worker {
         while (iterate.hasNext()) {
           Row row = iterate.next();
           for (String col : row.columns()) {
-            Iterable<FlamePair> outputIterable = lambda.op(new FlamePair(row.key(), row.get(col)));;
+            Iterable<FlamePair> outputIterable = lambda.op(new FlamePair(row.key(), row.get(col)));
+            ;
             if (outputIterable != null) {
               Iterator<FlamePair> outputIterator = outputIterable.iterator();
               while (outputIterator.hasNext()) {
@@ -507,7 +514,7 @@ class Worker extends cis5550.generic.Worker {
           Row joinRow = client.getRow(joinedTable, row.key());
           if (joinRow != null) {
             for (String col1 : row.columns()) {
-              for (String col2: joinRow.columns()) {
+              for (String col2 : joinRow.columns()) {
                 client.put(newTable, row.key(), col1 + "," + col2, row.get(col1) + "," + joinRow.get(col2));
               }
             }
@@ -520,7 +527,7 @@ class Worker extends cis5550.generic.Worker {
 
       return "OK";
     });
-  
+
     post("/rdd/fold", (request, response) -> {
       String oldTable = request.queryParams("oldtable");
       String newTable = request.queryParams("newtable");
@@ -605,7 +612,7 @@ class Worker extends cis5550.generic.Worker {
 
       return "OK";
     });
-  
+
     post("/rdd/mapPartitions", (request, response) -> {
       String oldTable = request.queryParams("oldtable");
       String newTable = request.queryParams("newtable");
@@ -650,7 +657,7 @@ class Worker extends cis5550.generic.Worker {
 
       return "OK";
     });
-  
+
     post("/rdd/cogroup", (request, response) -> {
       String oldTable = request.queryParams("oldtable");
       String newTable = request.queryParams("newtable");

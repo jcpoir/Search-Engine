@@ -13,10 +13,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import cis5550.tools.Logger;
 
 import cis5550.webserver.Server;
 
 public class Worker extends cis5550.generic.Worker {
+  private static final Logger logger = Logger.getLogger(Worker.class);
   private static Map<String, Map<String, Row>> map = new ConcurrentHashMap<>();
   private static Set<String> persistentTables = new HashSet<>();
 
@@ -152,6 +154,9 @@ public class Worker extends cis5550.generic.Worker {
       
   }
 
+  private static void printLog(String str) {
+    logger.info(str);
+  }
   public static void main(String[] args) throws IOException {
     int portNum = Integer.parseInt(args[0]);
     Server.port(portNum);
@@ -164,8 +169,8 @@ public class Worker extends cis5550.generic.Worker {
 
     Server.put("/data/:table_name/:row/:col", (req, res) -> {
       String tableName = req.params("table_name");
-      String row = req.params("row");
-      String col = req.params("col");
+      String row = java.net.URLDecoder.decode(req.params("row"), "UTF-8");
+      String col = java.net.URLDecoder.decode(req.params("col"), "UTF-8");
 
       putRow(tableName, row, storageDirectory);
 
@@ -199,8 +204,8 @@ public class Worker extends cis5550.generic.Worker {
 
     Server.get("/data/:table_name/:row/:col", (req, res) -> {
       String tableName = req.params("table_name");
-      String row = req.params("row");
-      String col = req.params("col");
+      String row = java.net.URLDecoder.decode(req.params("row"), "UTF-8");
+      String col = java.net.URLDecoder.decode(req.params("col"), "UTF-8");
 
       if (!map.containsKey(tableName) || !(map.get(tableName).containsKey(row))) {
         res.status(404, "Not Found");
@@ -261,7 +266,7 @@ public class Worker extends cis5550.generic.Worker {
   
     Server.get("/data/:table_name/:row", (req, res) -> {
       String tableName = req.params("table_name");
-      String row = req.params("row");
+      String row = java.net.URLDecoder.decode(req.params("row"), "UTF-8");
 
       if (!map.containsKey(tableName) || !(map.get(tableName).containsKey(row))) {
         res.status(404, "Not Found");
@@ -323,7 +328,7 @@ public class Worker extends cis5550.generic.Worker {
     });
 
     Server.put("/rename/:table_name", (req, res) -> {
-      String tableName = req.params("table_name");
+      String tableName = java.net.URLDecoder.decode(req.params("table_name"), "UTF-8");
       String newName = req.body();
 
       if (!map.containsKey(tableName)) {
@@ -351,7 +356,7 @@ public class Worker extends cis5550.generic.Worker {
     });
   
     Server.put("/delete/:table_name", (req, res) -> {
-      String tableName = req.params("table_name");
+      String tableName = java.net.URLDecoder.decode(req.params("table_name"), "UTF-8");
 
       if (!map.containsKey(tableName)) {
         res.status(404, "Not Found");

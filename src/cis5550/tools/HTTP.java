@@ -9,6 +9,8 @@ import java.security.*;
 import java.security.cert.X509Certificate;
 
 public class HTTP {
+  private static final Logger logger = Logger.getLogger(HTTP.class);
+
   public static class Response {
     byte body[];
     Map<String,String> headers;
@@ -117,6 +119,7 @@ public class HTTP {
         if (uploadOrNull != null)
           out.write(uploadOrNull);
         out.flush();
+
       } catch (IOException ioe) {
         try { sock.close(); } catch (Exception e) {}
         if (usingCached) {

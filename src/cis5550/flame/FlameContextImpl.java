@@ -13,6 +13,8 @@ import cis5550.tools.*;
 import cis5550.tools.Partitioner.Partition;
 
 public class FlameContextImpl implements FlameContext{
+  private static final Logger logger = Logger.getLogger(FlameContextImpl.class);
+
   private static KVSClient client; 
   private static String masterArg;
   private String storeOutput = null;
@@ -70,7 +72,8 @@ public class FlameContextImpl implements FlameContext{
     partitioner.addKVSWorker(client.getWorkerAddress(lastWorkerIndex), null, client.getWorkerID(0));
     partitioner.addKVSWorker(client.getWorkerAddress(lastWorkerIndex), client.getWorkerID(lastWorkerIndex), null);
 
-    Vector<String> flameWorkers = cis5550.generic.Master.getWorkers();
+    Vector<String> flameWorkers = new Vector<>(cis5550.generic.Master.getWorkers());
+
     for (String str : flameWorkers) {
       partitioner.addFlameWorker(str);
     }

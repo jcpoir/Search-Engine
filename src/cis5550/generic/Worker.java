@@ -27,7 +27,7 @@ public class Worker {
     return randomID.toString();
   }
 
-  public static void startPingThread(int portNum, String storageDirectory, String address) {
+  public static void startPingThread(String address, String storageDirectory, int portNum) {
     Thread thread = new Thread(() -> {
       while (true) {
         try {
