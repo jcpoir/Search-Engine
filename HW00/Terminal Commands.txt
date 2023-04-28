@@ -1,0 +1,55 @@
+Webserver:
+java -cp lib/kvs.jar:lib/webserver.jar cis5550.kvs.Master 8000
+
+Worker:
+java -cp lib/kvs.jar:lib/webserver.jar cis5550.kvs.Worker 8001 worker1 localhost:8000
+java -cp lib/kvs.jar:lib/webserver.jar cis5550.kvs.Worker 8002 worker1 localhost:8000
+
+Flame Master:
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar cis5550.flame.Master 9000 localhost:8000
+
+Flame Worker:
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar cis5550.flame.Worker 9001 localhost:9000
+
+Flame Worker #2 (same):
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar cis5550.flame.Worker 9002 localhost:9000
+
+== CRAWL ==
+
+Compile:
+javac -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar --source-path src src/cis5550/jobs/Crawler.java; cd bin; jar -cf Crawler.jar cis5550/jobs/Crawler.class cis5550/jobs/ cis5550/; cd ..; mv bin/Crawler.jar Crawler.jar;
+
+Start advanced crawl:
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar cis5550.flame.FlameSubmit localhost:9000 crawler.jar cis5550.jobs.Crawler http://advanced.crawltest.cis5550.net/
+
+== INDEX ==
+
+Compile:
+javac -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar --source-path src src/cis5550/jobs/Indexer.java; cd bin; jar -cf Indexer.jar cis5550/jobs/Indexer.class cis5550/tools/; cd ..; mv bin/Indexer.jar Indexer.jar;
+
+Start indexer:
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar cis5550.flame.FlameSubmit localhost:9000 indexer.jar cis5550.jobs.Indexer
+
+== INDEX OLD ==
+
+Compile:
+javac -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar --source-path src src/cis5550/jobs/IndexerOld.java; cd bin; jar -cf IndexerOld.jar cis5550/jobs/IndexerOld.class cis5550/tools/; cd ..; mv bin/IndexerOld.jar IndexerOld.jar;
+
+Start indexer:
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar cis5550.flame.FlameSubmit localhost:9000 indexer.jar cis5550.jobs.IndexerOld
+
+== PageRank ==
+
+Compile:
+javac -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:crawler.jar --source-path src src/cis5550/jobs/PageRank.java; cd bin; jar -cf PageRank.jar cis5550/jobs/PageRank.class; cd ..; mv bin/PageRank.jar PageRank.jar;
+
+Start:
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:crawler.jar cis5550.flame.FlameSubmit localhost:9000 pagerank.jar cis5550.jobs.PageRank
+
+== Ranker ==
+
+Compile:
+javac -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:crawler.jar --source-path src src/cis5550/jobs/Ranker.java; cd bin; jar -cf Ranker.jar cis5550/jobs/Ranker.class; cd ..; mv bin/Ranker.jar Ranker.jar;
+
+Start:
+java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:crawler.jar cis5550.flame.FlameSubmit localhost:9000 ranker.jar cis5550.jobs.Ranker hello
