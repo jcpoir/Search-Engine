@@ -209,7 +209,12 @@ public class Ranker {
 				
 				// temporary: see score breakdown
 				for (String metric : new String[] {"pagerank", "tf_idf", "score"}) {
-					byte[] value = String.format("%.2f", Float.parseFloat(new String(kvs_.get(rankingTabName, url, metric)))).getBytes();
+					
+					String val_str = "0.0";
+					byte[] output = kvs_.get(rankingTabName, url, metric); 
+					if (!Objects.isNull(output)) {val_str = new String(output); if (val_str.length() == 0) {val_str = "0.0";};}
+					
+					byte[] value = String.format("%.2f", Float.parseFloat(val_str)).getBytes();
 					kvs_.put(resultsTabName, index, metric, value);
 				}
 				
