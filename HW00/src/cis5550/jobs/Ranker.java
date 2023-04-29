@@ -47,6 +47,17 @@ public class Ranker {
 		
 		// for each word in the query, seperated by all non-alphanum characters, perform ranking
 		String[] words = query.split("\\P{Alnum}+"); final double n_words = (double) words.length;
+
+		// read stop words text file to get a list of stopwords to be filtered out from search query
+		Set<String> stopWords = new HashSet<>();
+		try (BufferedReader reader = new BufferedReader(new FileReader("stopwords.txt"))) {
+			String line;
+			while ((line = reader.readLine()) != null) {
+				stopWords.add(line);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 		
 		/*
 		 * SCORE CALCULATION
@@ -119,6 +130,11 @@ public class Ranker {
 		for (String word : words) {
 			
 			System.out.println("WORD: " + word);
+
+			// ignore if word is a stopword
+			if (stopWords.contains(word)) {
+				continue;
+			}
 			
 			// get urls/word poistions from index table
 			byte[] word_index_byte = kvs_.get("index", word, "url");
