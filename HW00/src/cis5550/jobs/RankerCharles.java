@@ -21,7 +21,6 @@ import cis5550.kvs.Row;
 import cis5550.tools.Hasher;
 
 public class RankerCharles {
-
   static double pagerank_weight = 0.9;
   static double tf_idf_weight = 0.1;
 
@@ -76,6 +75,8 @@ public class RankerCharles {
   }
 
   private static FlameRDDImpl topURLs(FlamePairRDDImpl rdd) {
+    final int THRESHOLD = 200;
+
     int i = 0;
     PairToPairIterable p2p = pair -> {
       List<Pair> pairList = new ArrayList<>();
@@ -94,9 +95,16 @@ public class RankerCharles {
       return returnList;
     };
 
-    while (rdd.count() > 200) {
+    FlamePairRDDImpl temp = rdd;
+    while (true) {
       i += 1;
-      rdd = rdd.flatMapToPair(p2p);
+      temp = rdd.flatMapToPair(p2p);
+
+      if (temp.count() < THRESHOLD) {
+        break;
+      }
+
+      rdd = temp;
     }
 
     FlameRDDImpl urls = rdd.flatMap(p2s);
@@ -149,8 +157,9 @@ public class RankerCharles {
     }
 
     FlamePairRDDImpl urlsFrequency = getURLsFrequency(client, Arrays.asList(words), stopWords);
-    FlameRDDImpl top200 = topURLs(urlsFrequency);
-    Set<String> urlStrings = new HashSet<>(top200.collect());
+    FlameRDDImpl subset = topURLs(urlsFrequency);
+    Set<String> urlStrings = new HashSet<>(subset.collect());
+    N = urlStrings.size();
 
     /*
      * SCORE CALCULATION
