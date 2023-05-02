@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Search Engine</title>
+    <link rel="stylesheet" href="styles.css">
+    <!--Axios import without npm-->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+</head>
+<body>
+    <header>
+        <h1>Simple Search Engine</h1>
+    </header>
+    <script src="search.js"></script>
+    <main>
+
+        <form id="search-form" onsubmit="search(event, 1)">
+            <input type="text" id="query" name="query" placeholder="Search...">
+            <button type="submit">Search</button>
+        </form>
+
+        <!-- <h2>Sample Searches:</h2>
+        <ul>
+            <li><a href="/search?query=anime">Anime</a></li>
+            <li><a href="/search?query=movies">Movies</a></li>
+            <li><a href="/search?query=technology">Technology</a></li>
+            <li><a href="/search?query=nature">Nature</a></li>
+        </ul> -->
+
+        <h2>Popular Categories:</h2>
+
+        <nav>
+            <a href="/category/books">Books</a>
+            <a href="/category/music">Music</a>
+            <a href="/category/sports">Sports</a>
+            <a href="/category/travel">Travel</a>
+        </nav>
+
+        <h2>Search Results:</h2>
+        <div id="search-results"></div>
+    </main>
+    <footer>
+        <p>&copy; 2023 Simple Search Engine. All rights reserved.</p>
+    </footer>
+</body>
+</html>
