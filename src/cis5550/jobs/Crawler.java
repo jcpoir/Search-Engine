@@ -1,508 +1,657 @@
 package cis5550.jobs;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.StringTokenizer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.Scanner;
+import java.io.StringWriter;
+import java.io.PrintWriter;
+import java.util.Iterator;
 
-import cis5550.flame.*;
+import java.io.*;
+import java.util.Scanner;
+import java.lang.Thread;
+import java.util.Set;
+import java.util.LinkedHashSet;
+
+import cis5550.flame.FlameContext;
+import cis5550.flame.FlameRDD;
 import cis5550.flame.FlameRDD.StringToIterable;
 import cis5550.kvs.KVSClient;
 import cis5550.kvs.Row;
 import cis5550.tools.Hasher;
+import cis5550.tools.Logger;
+import cis5550.tools.URLParser;
+import cis5550.webserver.Server;
+import cis5550.tools.EnglishFilter;
 
 public class Crawler {
-  private static String[] parseURL(String url) {
-    String result[] = new String[4];
-    int slashslash = url.indexOf("//");
-    if (slashslash > 0) {
-      result[0] = url.substring(0, slashslash - 1);
-      int nextslash = url.indexOf('/', slashslash + 2);
-      if (nextslash >= 0) {
-        result[1] = url.substring(slashslash + 2, nextslash);
-        result[3] = url.substring(nextslash);
-      } else {
-        result[1] = url.substring(slashslash + 2);
-        result[3] = "/";
-      }
-      int colonPos = result[1].indexOf(':');
-      if (colonPos > 0) {
-        result[2] = result[1].substring(colonPos + 1);
-        result[1] = result[1].substring(0, colonPos);
-      }
-    } else {
-      result[3] = url;
-    }
+	private static final Logger logger = Logger.getLogger(Server.class);
+	public static String normalize(String s, String base) {
+		String orig = s;
+		boolean secure = s.length() >= 8 && s.substring(0, 8).equals("https://") || base.length() >= 8 && base.substring(0, 8).equals("https://");
+		/* Strip # */
+		int index = s.indexOf('#');
+		if (index != -1) {
+			s = s.substring(0, index);
+		}
+		if (s.length() < 2) {
+			return null;
+		}
 
-    return result;
-  }
+		/* Strip everything after ? */
+		index = s.indexOf('?');
+		if (index != -1) {
+			s = s.substring(0, index);
+		}
 
-  private static String cleanSeedURL(String url) {
-    if (url.contains("#")) {
-      url = url.split("#")[0];
-      if (url == null || url.length() == 0) {
-        return null;
-      }
-    }
+		if (s.length() > 2048) {
+			logger.debug("=== Ignoring URL of length " + s.length());
+			return null; /* Probably not legit */
+		}
 
-    String[] parseHyperlink = parseURL(url);
-    if (parseHyperlink[2] == null) {
-      if (parseHyperlink[0].equals("http")) {
-        parseHyperlink[2] = "80";
-      } else {
-        parseHyperlink[2] = "443";
-      }
-    }
+		if (s.contains(" ")) {
+			/* Links can't contain spaces, silly */
+			logger.debug("=== Bad URL: " + s); /* Bad URL, or more likely a bug in parsing it */
+			return null;
+		}
+		if (s.startsWith("mailto:")) {
+			return null; /* No mail links */
+		}
+		/* Relative */
+		boolean relative = false;
+		index = base.lastIndexOf('/');
+		if (index != -1) {
+			base = base.substring(0, index);
+			//logger.debug("Base URL truncated to " + base);
+		}
+		while (s.length() > 2 && s.substring(0, 2).equals("..")) {
+			relative = true;
+			index = base.lastIndexOf('/');
+			if (index != -1) {
+				base = base.substring(0, index);
+				//logger.debug("Base URL truncated to " + base);
+			}
+			s = s.substring(3);
+		}
+		if (relative) {
+			s = base + s;
+		}
+		/* returns protocol, hostname, port, resource */
+		String[] up = URLParser.parseURL(s);
+		String[] up2 = URLParser.parseURL(base);
+		/* If relative, prepend base domain */
+		if (up[1] == null) {
+			up[1] = up2[1];
+		}
+		/* Use same protocol */
+		if (up[0] == null) {
+			up[0] = up2[0];
+		}
+		/* Port */
+		if (up[2] == null) {
+			up[2] = secure ? "443" : "80";
+		}
+		if (up[3].length() > 0 && up[3].charAt(0) != '/') {
+			/* was turning into e.g. http://info.cern.ch:80Technical.html
+			 * Need a slash after port */
+			up[3] = "/" + up[3];
+		}
+		s = up[0] + "://" + up[1] + ":" + up[2] + up[3];
+		logger.debug("Normalized " + orig + " to " + s);
+		return s;
+	}
+	public static boolean crawlable(String link) {
+		int index;
+		if (link != null) {
+			if (link.substring(0, 5).equals("http:") || link.substring(0, 6).equals("https:")) {
+				index = link.lastIndexOf('.');
+				if (index != -1) {
+					String extension = link.substring(index).toLowerCase();
+					if (extension.equals("jpg") || extension.equals("jpeg") || extension.equals("gif") || extension.equals("png") || extension.equals("text")) {
+						logger.debug("Discarding URL " + link);
+						return false;
+					}
+				}
+			}
+		}
+		return true;
+	}
+	public static void extract(List<String> l, String s, String base) {
+		int linksFound = 0;
+		for (;;) {
+			int index = s.indexOf("href=");
+			int index2 = s.indexOf("HREF=");
+			if (index == -1 && index2 == -1) {
+				break;
+			}
+			if (index2 == -1) {
+				;
+			} else if (index == -1) {
+				index = index2;
+			} else { /* Both */
+				index = Integer.min(index, index2);
+			}
+			index += 5;
+			s = s.substring(index);
+			//logger.debug("Remaining: " + s);
+			if (s.charAt(0) == '"') {
+				/* Look for " to end */
+				index = s.substring(1).indexOf('"');
+			} else {
+				/* Look for ' to end */
+				index = s.substring(1).indexOf("'");
+			}
+			if (index == -1) {
+				logger.warn("Unterminated open quote for hyperlink");
+				break;
+			}
+			String link = s.substring(1, index + 1); /* Add 1 since the substring search started at 1, not 0 */
+			linksFound++;
+			s = s.substring(index + 1);
+			link = normalize(link, base);
+			//logger.debug("Link: " + link);
+			if (link != null && crawlable(link)) {
+				if (!link.startsWith("http") && !link.startsWith("https")) { /* Ignore other protocols */
+					continue;
+				}
+				if (link.contains("..")) {
+					continue; /* ERROR Link was not normalized properly! */
+				}
+				l.add(link);
+			}
+		}
+		logger.debug(linksFound + " links found");
+	}
+	public static boolean parseRobots(String robots, String url) {
+		Scanner scanner = new Scanner(robots);
+		boolean inMatch = false;
+		int isAllowed = 0, isDisallowed = 0;
+		int sawRules = 0;
+		while (scanner.hasNextLine()) {
+			String line = scanner.nextLine();
+			if (line.length() < 1) {
+				continue;
+			}
+			if (line.startsWith("User-agent:")) {
+				if (sawRules > 0 && inMatch) {
+					break; /* Finished all rules for this agent */
+				}
+				sawRules = 0;
+				if (!inMatch) {
+					line = line.substring(11);
+					if (line.charAt(0) == ' ') {
+						line = line.substring(1);
+					}
+					if (line.equals("*") || line.equals("cis5550-crawler")) {
+						inMatch = true;
+					}
+				}
+			}
+			if (!inMatch) {
+				continue;
+			}
+			if (line.startsWith("Allow:")) {
+				sawRules++;
+				line = line.substring(6);
+				if (line.charAt(0) == ' ') {
+					line = line.substring(1);
+				}
+				if (url.startsWith(line)) {
+					isAllowed = line.length();
+				}
+			} else if (line.startsWith("Disallow:")) {
+				sawRules++;
+				line = line.substring(9);
+				if (line.charAt(0) == ' ') {
+					line = line.substring(1);
+				}
+				if (url.startsWith(line)) {
+					isDisallowed = line.length();
+				}
+				if (url.contains(line)) {
+					scanner.close();
+					return false;
+				}
+			}
+		}
+		scanner.close();
+		logger.debug("isDisallowed:" + isDisallowed + ",isDisallowed:" + isDisallowed);
+		boolean ret = isDisallowed == 0 || isAllowed > isDisallowed;
+		return ret;
+	}
+	public static String exceptionString(Exception e) {
+		StringWriter errors = new StringWriter();
+		e.printStackTrace(new PrintWriter(errors));
+		return errors.toString();
+	}
+	private static final int maxCrawls = 500000;
+	private static final int minCrawlInterval = 950; /* ms */
+	private static final int maxQueueSize = 90000;
+	private static FlameRDD urlQueue = null;
+	private static boolean done = false;
+	public static void run(FlameContext ctx, String[] strings) {
+		int index, crawlround = 0;
 
-    StringBuilder builder = new StringBuilder();
-    builder.append(parseHyperlink[0] + "://");
-    builder.append(parseHyperlink[1] + ":" + parseHyperlink[2]);
-    builder.append(parseHyperlink[3]);
+		if (strings.length != 1) {
+			ctx.output("Must provide exactly one seed");
+			return;
+		}
+		ctx.output("OK");
+		List<String> sl = new ArrayList<String>();
 
-    return builder.toString();
-  }
+		/* Normalize seed URL */
+		String seed = strings[0];
+		/* Strip # */
+		index = seed.indexOf('#');
+		if (index != -1) {
+			seed = seed.substring(0, index);
+		}
+		if (seed.length() < 2) {
+			logger.warn("Invalid seed");
+			return;
+		}
+		String[] up = URLParser.parseURL(seed);
+		if (up[2] == null) {
+			up[2] = up[0].equals("https") ? "443" : "80";
+		}
+		seed = up[0] + "://" + up[1] + ":" + up[2] + up[3];
 
-  private static String cleanURL(String url, String[] parseURL) {
-    String replaceURL = url;
-    // Remove hashtags
-    if (replaceURL.contains("#")) {
-      replaceURL = replaceURL.split("#")[0];
-      if (replaceURL == null || url.length() == 0) {
-        return null;
-      }
-    }
+		sl.add(seed);
+		try {
+			KVSClient kvsclientOuter = new KVSClient(ctx.getKVS().getMaster());
+			kvsclientOuter.persist("crawl");
+			kvsclientOuter.persist("hosts"); /* XXX Doesn't really *need* to be persistent... */
+			//kvsclientOuter.persist("queue");
+			/* Queue is persistent, load anything still in the queue when we start back up */
+			int oldsize = 0, oldqueue = 0, oldqueue2 = 0;
 
-    if (url.equals("/")) {
-      StringBuilder builder = new StringBuilder();
-      builder.append(parseURL[0] + "://");
-      builder.append(parseURL[1] + ":" + parseURL[2]);
-      builder.append('/');
+			oldqueue = 0;
+			String line = null;
+			File file = new File("queuefile.txt"); /* periodic permanent backup */
+			File file2 = new File("queuefile2.txt"); /* active queue backup */
+			try {
+				Scanner scanner = new Scanner(file);
+				while (scanner.hasNextLine()) {
+					line = scanner.nextLine();
+					sl.add(line);
+					oldqueue++;                    
+				}
+				scanner.close();
+				
+				Scanner scanner2 = new Scanner(file2);
+				while (scanner2.hasNextLine()) {
+					line = scanner2.nextLine();
+					sl.add(line);
+					oldqueue2++;                    
+				}
+				scanner2.close();
+				
+				/* Eliminate duplicates */
+				Set<String> urlset = new LinkedHashSet<>(sl);
 
-      replaceURL = builder.toString();
-      return replaceURL;
-    }
+				/* Need to remove any URLs that are already crawled */
+				int removed = 0;
+				Iterator<Row> i = kvsclientOuter.scan("crawl", null, null);
+				while (i.hasNext()) {
+					Row r = i.next();
+					for (String col : r.columns()) {
+						if (col.equals("url")) {
+							/* Already crawled */
+							if (urlset.contains(r.get(col))) {
+								urlset.remove(r.get(col));
+								removed++;
+							}
+						}
+					}
+				}
 
-    // Split the hyperlink by slashes
-    List<String> splitSlashesHyperlink = new ArrayList<>(Arrays.asList(replaceURL.split("/")));
-    // Split last part of url by slashes
-    List<String> splitSlashesOriginalURL = new ArrayList<>(Arrays.asList(parseURL[3].split("/")));
-    // Remove the first index
-    if (splitSlashesOriginalURL.size() > 0) {
-      splitSlashesOriginalURL.remove(0);
-    }
+				sl.clear();
+				sl.addAll(urlset);
+				oldsize = sl.size();
 
-    // Save the index to update the url from
-    int curIndexReplace = splitSlashesOriginalURL.size() - 1;
-    if (splitSlashesHyperlink.size() == 1) {
-      // Add to the url if there's nothing to replace or all has been replace
-      if (curIndexReplace == -1 || curIndexReplace >= splitSlashesOriginalURL.size()) {
-        splitSlashesOriginalURL.add(replaceURL);
-      } else {
-        splitSlashesOriginalURL.set(curIndexReplace, replaceURL);
-      }
-    } else {
-      for (String elem : splitSlashesHyperlink) {
-        if (elem.equals("..")) {
-          curIndexReplace -= 1;
-          continue;
-        } else if (elem.length() == 0) {
-          curIndexReplace = 0;
-          continue;
-        }
-        // Add to the url if there's nothing to replace or all has been replace
-        if (curIndexReplace >= splitSlashesOriginalURL.size()) {
-          splitSlashesOriginalURL.add(elem);
-        } else {
-          // Replace element of the current index
-          splitSlashesOriginalURL.set(curIndexReplace, elem);
-        }
-        curIndexReplace += 1;
+				/* Remove anything that's not English */
+				sl = EnglishFilter.filter(sl);
 
-        // Patch: Mistake
-        // Delete remaining elements if new url has fewer elements than old
-        if (curIndexReplace < splitSlashesOriginalURL.size() && curIndexReplace >= 0) {
-          splitSlashesOriginalURL.subList(curIndexReplace, splitSlashesOriginalURL.size()).clear();
-        }
-      }
-    }
+				/* Rewrite the file with all duplicates eliminated, from queuefile.txt and queuefile2.txt
+				 * otherwise we'll just have these be stuck here until we finish the next round and do a complete rewrite of the queue file
+				 * (and queuefile2.txt is never truncated/rewritten anywhere else) */
+				int realsize = 0;
+				/* XXX For some reason this never seems to happen? */
+				FileWriter fw = new FileWriter("queuefile.txt", false);
+				BufferedWriter bw = new BufferedWriter(fw);
+				PrintWriter out = new PrintWriter(bw);
+				for (String url2 : sl) {
+					out.println(url2);
+					realsize++;
+				}
+				out.close();
+				fw.close();
+				logger.debug("=== Actual queue size " + realsize + "  - already crawled " + removed);
+				/* Truncate queuefile2.txt */
+				FileWriter fw2 = new FileWriter("queuefile2.txt", false);
+				fw.close();
+			} catch (FileNotFoundException e) {
+				e.printStackTrace();
+			}           
 
-    StringBuilder builder = new StringBuilder();
-    builder.append(parseURL[0] + "://");
-    // Patch: Thought the port number was always going to be specified 
-    // in the page URL, so previously parseURL[2] would be null and 
-    // add null to the URL
-    builder.append(parseURL[1]);
-    if (parseURL[2] != null) {
-      builder.append(":" + parseURL[2]);
-    } else {
-      if (parseURL[0].equals("http")) {
-        parseURL[2] = "80";
-      } else {
-        parseURL[2] = "443";
-      }
-    }
-    for (String str : splitSlashesOriginalURL) {
-      builder.append("/" + str);
-    }
-    if (splitSlashesOriginalURL.size() == 0) {
-      builder.append("/");
-    }
+			logger.debug("==== Added from old queue: " + oldqueue + " + " + oldqueue2);
+			urlQueue = ctx.parallelize(sl);
 
-    replaceURL = builder.toString();
-    return replaceURL;
-  }
+			if (false) {
+				Thread runthread = new Thread(new Runnable() {
+					public void run() {
+						for (;;) {
+							try {
+								Thread.sleep(2000);
+							} catch (Exception e) {
+								e.printStackTrace();
+							}
+							try {
+								Thread.sleep(600000); /* Every 10 minutes */
+								if (done) {
+									return;
+								}
+								/*
+								urlQueue.saveAsTable("queue");
+								Iterator<Row> i = kvsclientOuter.scan("queue", null, null);
+								while (i.hasNext()) {
+									Row r = i.next();
+									for (String col : r.columns()) {
+										oldsize++;
+										String val = r.get(col);
+										logger.debug("==== " + col + "/" + val);
+										out.println(val);
+									}
+								}
+								*/
+								List<String> queueurls = urlQueue.collect();
+								int oldsize = 0;
 
-  private static String cleanCompleteURL(String url) {
-    if (url.contains("#")) {
-      url = url.split("#")[0];
-      if (url == null || url.length() == 0) {
-        return null;
-      }
-    }
+								FileWriter fw = new FileWriter("queuefile.txt", false);
+								BufferedWriter bw = new BufferedWriter(fw);
+								PrintWriter out = new PrintWriter(bw);
+								for (String url2 : queueurls) {
+									out.println(url2);
+									oldsize++;
+								}
+								out.close();
+								fw.close();
+								logger.debug("=== Backup queue size " + oldsize);
+							} catch (Exception e) {
+								e.printStackTrace();
+								logger.error("==== Backup Exception: " + exceptionString(e));
+							}
+						}
+					}});
+				runthread.start();
+			}
 
-    String[] parseHyperlink = parseURL(url);
+			while (urlQueue.count() > 0) {
+				crawlround++;
+				int crawlCount = kvsclientOuter.count("crawl");
+				if (crawlCount > maxCrawls) {
+					logger.debug("==== Reached max crawls allowed: " + maxCrawls);
+					break;
+				}
+				final int currentQueueSize = urlQueue.count();
+				logger.debug("========== Round " + crawlround + ": Queue contains " + currentQueueSize + " URLs, " + crawlCount + " already finished");
+				String kvsMaster = ctx.getKVS().getMaster();
 
-    if (parseHyperlink[0] == null || (!parseHyperlink[0].equals("http") && !parseHyperlink[0].equals("https"))) {
-      return null;
-    }
+				StringToIterable l =  (crawlUrl) -> {
+					String hash = Hasher.hash(crawlUrl);
+					KVSClient kvsclient2 = new KVSClient(kvsMaster);
+					Row r = kvsclient2.getRow("crawl", hash);
+					List<String> newlinks = new ArrayList<String>();
+					if (r != null) {
+						//logger.debug("*** Skipping repeat crawl of " + crawlUrl);
+						return newlinks;
+					}
+					int responseCode;
+					String inputLine;
+					String contentType = null, contentLength = null;
 
-    if (parseHyperlink[3] == null) {
-      return null;
-    }
-    String[] splitSlashes = parseHyperlink[3].split("/");
-    if (splitSlashes.length > 1) {
-      String[] getFileExtension = splitSlashes[splitSlashes.length - 1].split("\\.");
-      if (getFileExtension.length > 1) {
-        HashSet<String> prohibitedFileExtensions = new HashSet<String>(Set.of("jpg", "jpeg", "gif", "png", "txt"));
-        if (prohibitedFileExtensions.contains(getFileExtension[getFileExtension.length - 1])) {
-          return null;
-        }
-      }
-    }
+					String keyHash = Hasher.hash(crawlUrl);
+					KVSClient kvsclient = new KVSClient(kvsMaster);
 
-    if (parseHyperlink[2] == null) {
-      if (parseHyperlink[0].equals("http")) {
-        parseHyperlink[2] = "80";
-      } else {
-        parseHyperlink[2] = "443";
-      }
-    }
+					String[] up3 = URLParser.parseURL(crawlUrl);
 
-    StringBuilder builder = new StringBuilder();
-    builder.append(parseHyperlink[0] + "://");
-    builder.append(parseHyperlink[1] + ":" + parseHyperlink[2]);
-    builder.append(parseHyperlink[3]);
+					long unixTime = System.currentTimeMillis(); /* epoch but in ms */
+					boolean firstHost = false;
+					if (up3[1] == null) {
+						logger.error("Host was NULL?");
+						/* Avoid null pointer exception */
+						return newlinks;
+					}
+					byte[] tmp = kvsclient.get("hosts", up3[1], "timestamp");
+					if (tmp != null) {
+						String tmps = new String(tmp);
+						//logger.debug("String: " + tmps);
+						long t = Long.parseLong(tmps);
+						if (unixTime < t + minCrawlInterval) {
+							newlinks.add(crawlUrl); /* Crawl later */
+							//logger.debug("Will need to delay crawl of " + crawlUrl);
+							return newlinks;
+						}
+					} else {
+						firstHost = true;
+					}
 
-    return builder.toString();
-  }
+					kvsclient.put("hosts", up3[1], "timestamp", Long.toString(unixTime));
 
-  private static List<String> getURLsFromPage(String html, String originalUrl) {
-    Set<String> urls = new HashSet<>();
-    Pattern pattern = Pattern.compile("<a\\s+href=\"([^\"]*)\"[^>]*>");
-    Matcher matcher = pattern.matcher(html);
+					if (true) {
+						/* Keep track of # pages crawled on this host.
+						 * Since there could be multiple workers, this is not necessarily atomic,
+						 * but that's fine if this is approximate.
+						 * Main purpose is to bail out if this gets too large. */
+						tmp = kvsclient.get("hosts", up3[1], "pagecount");
+						if (tmp != null) {
+							String tmps = new String(tmp);
+							int pagecount = Integer.parseInt(tmps);
+							pagecount++;
+							kvsclient.put("hosts", up3[1], "pagecount", Integer.toString(pagecount));
+							if (pagecount > 10000) { /* XXX What about big sites, e.g. Wikipedia? */
+								logger.debug("==== Reached max crawls for host " + up3[1]);
+								return newlinks; /* Return the empty list to avoid crawling further links on this page */
+							}
+						} else {
+							kvsclient.put("hosts", up3[1], "pagecount", "1");
+						}
+					}
 
-    String[] parseURL = parseURL(originalUrl);
-    while (matcher.find()) {
-      String url = matcher.group(1);
-      if (parseURL(url)[0] != null) {
-        url = cleanCompleteURL(url);
-      } else {
-        url = cleanURL(url, parseURL);
-      }
+					///* Shouldn't be a race condition since each URL only goes out to one worker */
+					//kvsclient.put("queue", "url", crawlUrl, ""); /* "Delete" from queue */
 
-      if (url != null) {
-        urls.add(url);
-      }
-    }
+					try {
+						URL url;
+						String robots = null;
+						if (firstHost) {
+							url = new URL(up3[0] + "://" + up3[1] + "/robots.txt");
+							HttpURLConnection con = (HttpURLConnection) url.openConnection();
+							con.setRequestMethod("GET");
+							con.setConnectTimeout(10000); /* 10 second timeout */
+							con.setRequestProperty("User-Agent", "cis5550-crawler");
+							con.connect();
+							responseCode = con.getResponseCode();
+							if (responseCode == 200) {
+								InputStreamReader isr = new InputStreamReader(con.getInputStream());
+								BufferedReader in = new BufferedReader(isr);
+								StringBuffer response = new StringBuffer();
+								while ((inputLine = in.readLine()) != null) {
+									response.append(inputLine);
+								}
+								robots = response.toString();
+								kvsclient.put("hosts",  up3[1], "robots", robots);
+							}
+						} else {
+							tmp = kvsclient.get("hosts", up3[1], "robots");
+							if (tmp != null) {
+								robots = new String(tmp);
+							}
+						}
+						if (robots != null && robots.length() > 0) {
+							boolean allowed = parseRobots(robots, up3[3]);
+							if (!allowed) {
+								logger.debug("===== DISALLOWED by robots.txt: " + crawlUrl);
+								return newlinks;
+							}
+						}
 
-    List<String> toReturn = new ArrayList<>();
-    toReturn.addAll(urls);
+						url = new URL(crawlUrl);
+						HttpURLConnection con = (HttpURLConnection) url.openConnection();
+						con.setRequestMethod("HEAD");
+						con.setConnectTimeout(10000); /* 10 second timeout */
+						con.setRequestProperty("User-Agent", "cis5550-crawler");
+						con.connect();
+						responseCode = con.getResponseCode();
+						int headResponse = responseCode;
+						if (responseCode > 0) {
+							boolean isRedirect = responseCode == 301 || responseCode == 302 || responseCode == 303 || responseCode == 307 || responseCode == 308;
+							contentLength = con.getHeaderField("Content-Length");
+							contentType = con.getHeaderField("Content-Type");
+							String location = con.getHeaderField("Location");
+							if (isRedirect && location != null) {
+								logger.debug("==== Redirect: " + location);
+								String link = normalize(location, crawlUrl);
+								//logger.debug("Link: " + link);
+								if (link != null && crawlable(link)) {
+									newlinks.add(link); /// TODO: should this be newlinks, not sl? Okay, changed
+								}
+							}
+							//logger.debug("Done parsing headers");
+						} else {
+							//logger.debug("No headers");
+						}
 
-    return toReturn;
-  }
+						kvsclient.put("crawl", keyHash, "responseCode", Integer.toString(responseCode));
+						kvsclient.put("crawl", keyHash, "url", crawlUrl);
+						if (contentLength != null) {
+							kvsclient.put("crawl", keyHash, "length", contentLength);
+						}
+						if (contentType != null) {
+							kvsclient.put("crawl", keyHash, "contentType", contentType);
+						}
+						if (responseCode != 200) {
+							logger.debug("==== Not crawling HTTP code " + responseCode + ": " + crawlUrl);
+							return newlinks;
+						}
+						/* May contain more things like charset too */
+						if (contentType != null && !contentType.contains("text/html")) {
+							logger.debug("==== Not crawling non HTML " + crawlUrl + ": " + contentType);
+							return newlinks;
+						}
+						con.disconnect();
 
-  private static boolean robot(String content, String url) {
-    if ("".equals(content)) {
-      return false;
-    }
+						con = (HttpURLConnection) url.openConnection();
+						con.setRequestMethod("GET");
+						con.setConnectTimeout(10000); /* 10 second timeout */
+						con.setRequestProperty("User-Agent", "cis5550-crawler");
+						con.connect();
+						responseCode = con.getResponseCode();
+						if (headResponse == 200) {
+							kvsclient.put("crawl", keyHash, "responseCode", Integer.toString(responseCode));
+						}
+						if (responseCode != 200) {
+							logger.debug("== Not storing non 200 " + crawlUrl);
+							return newlinks;
+						}
+						InputStreamReader isr = new InputStreamReader(con.getInputStream());
+						BufferedReader in = new BufferedReader(isr);
+						StringBuffer response = new StringBuffer();
 
-    final String PATTERNS_USERAGENT = "(?i)^User-agent:.*";
-    final String PATTERNS_DISALLOW = "(?i)Disallow:.*";
-    final String PATTERNS_ALLOW = "(?i)Allow:.*";
-    final int PATTERNS_USERAGENT_LENGTH = 11;
-    final int PATTERNS_DISALLOW_LENGTH = 9;
-    final int PATTERNS_ALLOW_LENGTH = 6;
+						while ((inputLine = in.readLine()) != null) {
+							response.append(inputLine);
+							response.append("\n");
+						}
+						con.disconnect();
+						in.close();
+						isr.close();
+						kvsclient.put("crawl", keyHash, "page", response.toString());
 
-    boolean inMatchingUserAgent = false;
-    HashSet<String> allowSet = new HashSet<>();
-    HashSet<String> disallowSet = new HashSet<>();
+						if (currentQueueSize > maxQueueSize) {
+							logger.debug("=== Crawled only (@" + currentQueueSize + ") " + crawlUrl + " (links found: " + newlinks.size() + "), already at " + currentQueueSize);
+							return newlinks; /* Prevent queue from growing too large to avoid running out of memory */
+						}
 
-    StringTokenizer st = new StringTokenizer(content, "\n");
-    while (st.hasMoreTokens()) {
-      String line = st.nextToken();
+						extract(newlinks, response.toString(), crawlUrl);
+						logger.debug("=== Crawled (@" + currentQueueSize + ") " + crawlUrl + " (links found: " + newlinks.size() + ")");
+					} catch (Exception e) {
+						e.printStackTrace();
+						logger.debug("==== Crawl exception occured in crawler (" + crawlUrl + "): " + exceptionString(e));
+					}
 
-      if (line.length() == 0) {
-        continue;
-      }
+					/* Eliminate duplicates */
+					Set<String> urlset = new LinkedHashSet<>(newlinks);
+					newlinks.clear();
+					newlinks.addAll(urlset);
 
-      if (line.matches(PATTERNS_USERAGENT)) {
-        String ua = line.substring(PATTERNS_USERAGENT_LENGTH).trim().toLowerCase();
-        if ("*".equals(ua) || "cis5550-crawler".equals(ua)) {
-          inMatchingUserAgent = true;
-        } else {
-          inMatchingUserAgent = false;
-        }
-      } else if (line.matches(PATTERNS_DISALLOW)) {
-        if (!inMatchingUserAgent) {
-          continue;
-        }
-        String path = line.substring(PATTERNS_DISALLOW_LENGTH).trim();
-        if (path.endsWith("*")) {
-          path = path.substring(0, path.length() - 1);
-        }
-        path = path.trim();
-        if (path.length() > 0) {
-          disallowSet.add(path);
-        }
-      } else if (line.matches(PATTERNS_ALLOW)) {
-        if (!inMatchingUserAgent) {
-          continue;
-        }
-        String path = line.substring(PATTERNS_ALLOW_LENGTH).trim();
-        if (path.endsWith("*")) {
-          path = path.substring(0, path.length() - 1);
-        }
-        path = path.trim();
-        allowSet.add(path);
-      }
-    }
+					/* Remove anything that's not English */
+					newlinks = EnglishFilter.filter(newlinks);
 
-    int disallowSize = 0;
-    for (String s : disallowSet) {
-      if (url.startsWith(s) && (s.length() > disallowSize)) {
-        disallowSize = s.length();
-      }
-    }
+					/* Append since FlameRDD doesn't update */
+					FileWriter fw = new FileWriter("queuefile2.txt", true); /* DO append here */
+					BufferedWriter bw = new BufferedWriter(fw);
+					PrintWriter out = new PrintWriter(bw);
+					for (String url2 : newlinks) {
+						out.println(url2);
+					}
+					out.close();
+					fw.close();
 
-    if (disallowSize > 0) {
-      for (String s : allowSet) {
-        if (url.startsWith(s) && (s.length() > disallowSize)) {
-          return false;
-        }
-      }
+					return newlinks;
+				};
+				try {
+					urlQueue = urlQueue.flatMap(l);
+					if (urlQueue == null) {
+						logger.debug("=== Queue is empty after " + crawlround + " rounds");
+						break;
+					}
+				} catch (Exception e) {
+					logger.debug("==== Flatmap exception occured: " + exceptionString(e));
+					e.printStackTrace();
+					break;
+				}
+				try {
+					/*
+					urlQueue.saveAsTable("queue");
+					Iterator<Row> i = kvsclientOuter.scan("queue", null, null);
+					while (i.hasNext()) {
+						Row r = i.next();
+						for (String col : r.columns()) {
+							oldsize++;
+							String val = r.get(col);
+							logger.debug("==== " + col + "/" + val);
+							out.println(val);
+						}
+					}
+					*/
+					List<String> queueurls = urlQueue.collect();
+					oldsize = 0;
 
-      return true;
-    } else {
-      return false;
-    }
-
-    // System.out.println(disallowSet);
-    // System.out.println(allowSet);
-
-  }
-
-  private static boolean checkRateLimit(byte[] hostRobotFile, String str, long lastAccessTime) throws IOException {
-    InputStream is = new ByteArrayInputStream(hostRobotFile);
-    BufferedReader bfReader = new BufferedReader(new InputStreamReader(is));
-    String subLink = parseURL(str)[3];
-    boolean containsCrawlDelay = false;
-    boolean isFoundAgent = false;
-
-    String temp = bfReader.readLine();
-    while (temp != null) {
-      if (temp.equals("User-agent: cis5550-crawler")) {
-        isFoundAgent = true;
-        temp = bfReader.readLine();
-        while (temp != null && temp.length() > 1) {
-          if (temp.contains("Crawl-delay")) {
-            containsCrawlDelay = true;
-            float parseDelaySeconds = Float.parseFloat(temp.split(" ")[1]);
-            long parseDelayAllowed = (long) (parseDelaySeconds * 1000);
-            parseDelayAllowed = parseDelayAllowed * 1000;
-
-            long curTime = System.currentTimeMillis();
-            if (curTime - lastAccessTime <= parseDelayAllowed) {
-              return true;
-            }
-          }
-
-          temp = bfReader.readLine();
-        }
-      }
-      temp = bfReader.readLine();
-    }
-    if (isFoundAgent) {
-      is = new ByteArrayInputStream(hostRobotFile);
-      bfReader = new BufferedReader(new InputStreamReader(is));
-      temp = bfReader.readLine();
-      while (temp != null) {
-        if (temp.equals("User-agent: *")) {
-          isFoundAgent = true;
-          temp = bfReader.readLine();
-          while (temp != null && temp.length() > 1) {
-            if (temp.contains("Crawl-delay")) {
-              containsCrawlDelay = true;
-              float parseDelaySeconds = Float.parseFloat(temp.split(" ")[1]);
-              long parseDelayAllowed = (long) (parseDelaySeconds * 1000);
-              parseDelayAllowed = parseDelayAllowed * 1000;
-
-              long curTime = System.currentTimeMillis();
-              if (curTime - lastAccessTime <= parseDelayAllowed) {
-                return true;
-              }
-            }
-
-            temp = bfReader.readLine();
-          }
-        }
-        temp = bfReader.readLine();
-      }
-    }
-
-  
-    if (!containsCrawlDelay) {
-      long curTime = System.currentTimeMillis();
-      if (curTime - lastAccessTime <= 1000) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  public static void run(FlameContext context, String args[]) throws Exception {
-    if (args.length != 1) {
-      context.output("ERROR: Args length not equal 1");
-      return;
-    }
-
-    String master = context.getKVS().getMaster();
-
-    StringToIterable lambda = (String str) -> {
-      List<String> list = new ArrayList<>();
-      KVSClient client = new KVSClient(master);
-
-      // Check if webpage is already crawled
-      if (client.getRow("crawl", Hasher.hash(str)) != null) {
-        return list;
-      }
-
-      if (str.equals(args[0])) {
-        str = cleanSeedURL(str);
-      }
-      URL url = new URL(str);
-
-      String hostKey = parseURL(str)[1] + ":" + parseURL(str)[2];
-      // Read Robots
-      byte[] hostRobot = client.get("hosts", hostKey, "robots");
-      if (hostRobot == null) {
-        String[] parseURL = parseURL(str);
-        String robotsURLstr = parseURL[0] + "://" + parseURL[1] + ":" + parseURL[2] + "/robots.txt";
-        URL robotsURL = new URL(robotsURLstr);
-        HttpURLConnection con = (HttpURLConnection) robotsURL.openConnection();
-        con.setRequestMethod("GET");
-        con.setRequestProperty("User-Agent", "cis5550-crawler");
-
-        if (con.getResponseCode() == 200) {
-          Row newRow = new Row(hostKey);
-          InputStream stream = con.getInputStream();
-          byte[] input = stream.readAllBytes();
-          newRow.put("robots", input);
-          client.putRow("hosts", newRow);
-        } else {
-          client.putRow("hosts", new Row(hostKey));
-        }
-      }
-
-      // Check Robot Allowed or Disallowed
-      hostRobot = client.get("hosts", parseURL(str)[1] + ":" + parseURL(str)[2], "robots");
-      boolean notProceed = robot(new String(hostRobot, "utf-8"), parseURL(str)[3]);
-      if (notProceed) {
-        return list;
-      }
-
-      // Rate Limiting
-      byte[] timeBytes = client.get("hosts", parseURL(str)[1], "time");
-      long lastAccessTime = -1;
-      if (timeBytes != null && timeBytes.length > 0) {
-        lastAccessTime = ByteBuffer.wrap(timeBytes).getLong();
-      }
-      boolean outsideRateLimit = checkRateLimit(hostRobot, str, lastAccessTime);
-      if (outsideRateLimit) {
-        list.add(str);
-        return list;
-      } else {
-        byte[] curTimeBytes = ByteBuffer.allocate(Long.BYTES).putLong(System.currentTimeMillis()).array();
-        client.put("hosts", parseURL(str)[1], "time", curTimeBytes);
-      }
-
-      // Initial HEAD Connection
-      HttpURLConnection con = (HttpURLConnection) url.openConnection();
-      con.setRequestMethod("HEAD");
-      con.setRequestProperty("User-Agent", "cis5550-crawler");
-      con.setInstanceFollowRedirects(false);
-      
-      Row row = new Row(Hasher.hash(str));
-      row.put("url", str);
-      row.put("responseCode", Integer.toString(con.getResponseCode()));
-      if (con.getContentType() != null) {
-        row.put("contentType", con.getContentType());
-      }
-      if (con.getContentLengthLong() != -1) {
-        row.put("length", Long.toString(con.getContentLengthLong()));
-      }
-
-      // Redirection
-      Set<Integer> redirectCodes = Set.of(301, 302, 303, 307, 308);
-      if (redirectCodes.contains(con.getResponseCode())) {
-        String redirectURL = con.getHeaderField("Location");
-        String[] parseURL = parseURL(str);
-        if (parseURL(redirectURL)[0] != null) {
-          redirectURL = cleanCompleteURL(redirectURL);
-        } else {
-          redirectURL = cleanURL(redirectURL, parseURL);
-        }
-        list.add(redirectURL);
-      }
-      
-      // Crawl Webpage
-      if (con.getResponseCode() == 200) {
-        con = (HttpURLConnection) url.openConnection();
-        con.setRequestMethod("GET");
-        con.setRequestProperty("User-Agent", "cis5550-crawler");
-        row.put("responseCode", Integer.toString(con.getResponseCode()));
-        if (con.getContentType().equals("text/html")) {
-          InputStream stream = con.getInputStream();
-          byte[] input = stream.readAllBytes();
-          row.put("page", input);
-
-          list = getURLsFromPage(new String(input), str);
-        }
-      }
-      
-      client.putRow("crawl", row);
-
-      return list;
-    };
-
-    FlameRDD urlQueue = context.parallelize(Arrays.asList(args));
-    while (urlQueue.count() != 0) {
-      urlQueue = urlQueue.flatMap(lambda);
-      Thread.sleep(500);
-    }
-    
-    context.output("OK");
-  }
+					FileWriter fw = new FileWriter("queuefile.txt", false);
+					BufferedWriter bw = new BufferedWriter(fw);
+					PrintWriter out = new PrintWriter(bw);
+					for (String url2 : queueurls) {
+						out.println(url2);
+						oldsize++;
+					}
+					out.close();
+					fw.close();
+					logger.debug("=== Backup queue size " + oldsize);
+				} catch (Exception e) {
+					e.printStackTrace();
+					logger.error("==== Backup Exception: " + exceptionString(e));
+				}
+			}
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			logger.debug("==== Fatal exception occured in crawler" + exceptionString(e));
+		}
+		logger.debug("==== Crawler finally exiting after " + crawlround + " rounds (queue empty)");
+		done = true;
+	}
 }
