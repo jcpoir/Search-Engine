@@ -109,7 +109,10 @@ public class EnglishFilter {
 	   List<String> out = new LinkedList<String>();
 	   
 	   for (String url: URLs) {
-		   out.add(filter(url));
+		String filtered = filter(url);
+		if (filtered != null) {
+			out.add(filtered);
+		}
 	   }
 
 	   return out;
