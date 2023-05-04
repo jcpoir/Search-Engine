@@ -1,6 +1,9 @@
 package cis5550.jobs;
 
-import com.google.gson.Gson;
+import java.io.*;
+import java.net.*;
+import com.google.gson.*;
+import javax.net.ssl.HttpsURLConnection;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -34,6 +37,12 @@ public class Search {
 	static Stemmer stemmer; static String delimiter1 = "\\^"; static String delimiter2 = "~"; 
 	public static double N = -1; public static int df = -1; public static double n_words = -1;
 	static boolean ignore_stopwords = true;
+
+	static String host = "https://api.bing.microsoft.com/";
+	static String path = "v7.0/spellcheck";
+	static String key = "7b2a9676b18244959a31d036256c46e3";
+	static String mkt = "en-US";
+	static String mode = "proof";
 	
 	public static Set<String> stopWords = new HashSet<>(Arrays.asList(
 		    "a", "an", "the", "and", "but", "or", "for", "nor", "so", "yet",
@@ -185,12 +194,21 @@ public class Search {
 		return n;
 	}
 	
-	public static String convertListToJson(List<Map<String, String>> list) {
+	public static String convertMapToJson(Map<String, Object> map) {
 		// Create Gson instance
 		Gson gson = new Gson();
 
-		// Convert List to JSON
-		String json = gson.toJson(list);
+		// Convert spellcheck array to a string with words separated by spaces
+		if (map.containsKey("spellcheck")) {
+			String[] spellcheckArray = (String[]) map.get("spellcheck");
+			String spellcheckString = String.join(" ", spellcheckArray);
+
+			// Update the map with the modified spellcheck string
+			map.put("spellcheck", spellcheckString);
+		}
+
+		// Convert map to JSON
+		String json = gson.toJson(map);
 
 		return json;
 	}
@@ -229,6 +247,86 @@ public class Search {
 		return "";
 	}
 
+	public static String[] spellCheck(String[] words) throws Exception {
+		String params = "?mkt=" + mkt + "&mode=" + mode;
+		URL url = new URL(host + path + params);
+		HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
+		connection.setRequestMethod("POST");
+		connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+		connection.setRequestProperty("Ocp-Apim-Subscription-Key", key);
+		connection.setDoOutput(true);
+
+		// Prepare the request body with the text parameter
+		StringBuilder requestBodyBuilder = new StringBuilder();
+		for (String word : words) {
+			requestBodyBuilder.append("text=").append(URLEncoder.encode(word, "UTF-8")).append("&");
+		}
+		requestBodyBuilder.deleteCharAt(requestBodyBuilder.length() - 1); // Remove the last "&"
+
+		// Write the request body to the connection's output stream
+		try (DataOutputStream wr = new DataOutputStream(connection.getOutputStream())) {
+			wr.writeBytes(requestBodyBuilder.toString());
+			wr.flush();
+		}
+
+		// Read the API response
+		try (BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
+			StringBuilder responseBuilder = new StringBuilder();
+			String line;
+			while ((line = in.readLine()) != null) {
+				responseBuilder.append(line);
+			}
+			String apiResponse = responseBuilder.toString();
+
+			// Parse the JSON response using Gson
+			Gson gson = new Gson();
+			JsonObject responseJson = gson.fromJson(apiResponse, JsonObject.class);
+
+			// Access the flaggedTokens array
+			JsonArray flaggedTokensArray = responseJson.getAsJsonArray("flaggedTokens");
+
+			// Create a set to store the misspelled words
+			List<String> spellCheckedWordsList = new LinkedList<>(List.of(words));
+
+			// Iterate over the flaggedTokens
+			for (JsonElement flaggedTokenElement : flaggedTokensArray) {
+				JsonObject flaggedTokenJson = flaggedTokenElement.getAsJsonObject();
+
+				// Retrieve the token (misspelled word)
+				String token = flaggedTokenJson.get("token").getAsString();
+
+				// Retrieve the suggestions array
+				JsonArray suggestionsArray = flaggedTokenJson.getAsJsonArray("suggestions");
+
+				// Check if suggestions are available
+				if (!suggestionsArray.isJsonNull() && suggestionsArray.size() > 0) {
+					// Get the first suggestion (top suggestion)
+					JsonObject topSuggestionJson = suggestionsArray.get(0).getAsJsonObject();
+					String topSuggestion = topSuggestionJson.get("suggestion").getAsString();
+
+					// Replace the misspelled word with the top suggestion using replaceAll
+					for (int i = 0; i < spellCheckedWordsList.size(); i++) {
+							if (spellCheckedWordsList.get(i).equals(token)) {
+									spellCheckedWordsList.set(i, topSuggestion);
+							}
+					}
+				} 
+			}
+
+			// Create an array to store the spell-checked words
+			String[] spellCheckedWords = spellCheckedWordsList.toArray(new String[0]);
+
+			return spellCheckedWords;
+		}
+	}
+
+	public static String prettify(String json_text) {
+		JsonParser parser = new JsonParser();
+		JsonElement json = parser.parse(json_text);
+		Gson gson = new GsonBuilder().setPrettyPrinting().create();
+		return gson.toJson(json);
+	}
+
 	public static void main(String[] args) throws IOException {
 		int portnumber = Integer.parseInt(args[1]);
 		Server.port(portnumber);
@@ -238,29 +336,36 @@ public class Search {
 		KVSClient kvs = new KVSClient(KVS_address);
 
 		Server.get("/search", (req, res) -> {
+			System.out.println("START: " + System.currentTimeMillis());
 			res.header("Access-Control-Allow-Origin", "*");
 			res.header("Access-Control-Allow-Credentials", "true");
 
 			String query = URLDecoder.decode(req.queryParams("query"), "UTF-8");
-
 			String[] words = split_stem(query);
+			System.out.println("SPELLCHECK BEFORE: " + System.currentTimeMillis());
+			String[] spellCheck = spellCheck(words);
+			System.out.println("SPELLCHECK AFTER: " + System.currentTimeMillis());
 
-			if (all_stopwords(words)) {
+			if (all_stopwords(spellCheck)) {
 				System.out.println("All stopwords!");
 				ignore_stopwords = false;
 			}
 
-			n_words = get_word_n(words);
+			n_words = get_word_n(spellCheck);
 
+			System.out.println("COUNT BEFORE: " + System.currentTimeMillis());
 			N = kvs.count("hosts");
+			System.out.println("COUNT AFTER: " + System.currentTimeMillis());
 
 			/*
 			 * 1. Building tf-idf map
 			 */
 
+			System.out.println("TIME 1 BEFORE: " + System.currentTimeMillis());
 			Map<String, Double> tf_idfs = new HashMap<String, Double>();
+			System.out.println("TIME 1 AFTER: " + System.currentTimeMillis());
 
-			for (String word : words) {
+			for (String word : spellCheck) {
 
 				boolean stopword = is_stopword(word);
 
@@ -306,6 +411,7 @@ public class Search {
 			 * 2. Adding pageranks via weighted sum of logs
 			 */
 
+			System.out.println("TIME 2 BEFORE: " + System.currentTimeMillis());
 			Map<Double, Set<String>> scores = new HashMap<Double, Set<String>>();
 
 			for (Entry<String, Double> entry : tf_idfs.entrySet()) {
@@ -342,6 +448,7 @@ public class Search {
 				}
 
 			}
+			System.out.println("TIME 2 AFTER: " + System.currentTimeMillis());
 
 			/*
 			 * 3. Sort results & report
@@ -350,7 +457,9 @@ public class Search {
 			List<Double> ranking = new LinkedList<Double>();
 			ranking.addAll(scores.keySet());
 
+			System.out.println("SORT BEFORE: " + System.currentTimeMillis());
 			ranking = sortTopN(ranking, n_results);
+			System.out.println("SORT AFTER: " + System.currentTimeMillis());
 
 			List<String> results = poll_results(ranking, scores, n_results);
 
@@ -366,7 +475,13 @@ public class Search {
 				urlAndPage.add(map);
 			}
 
-			return convertListToJson(urlAndPage);
+			Map<String, Object> json = new HashMap<>();
+			if (!Arrays.equals(spellCheck, words)) {
+				json.put("spellcheck", spellCheck);
+			}
+			json.put("results", urlAndPage);
+			System.out.println("END: " + System.currentTimeMillis());
+			return convertMapToJson(json);
 		});
 
 		
