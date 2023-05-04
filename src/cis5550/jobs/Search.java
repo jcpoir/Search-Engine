@@ -336,15 +336,15 @@ public class Search {
 		KVSClient kvs = new KVSClient(KVS_address);
 
 		Server.get("/search", (req, res) -> {
-			System.out.println("START: " + System.currentTimeMillis());
+			long startstime = System.currentTimeMillis();
 			res.header("Access-Control-Allow-Origin", "*");
 			res.header("Access-Control-Allow-Credentials", "true");
 
 			String query = URLDecoder.decode(req.queryParams("query"), "UTF-8");
 			String[] words = split_stem(query);
-			System.out.println("SPELLCHECK BEFORE: " + System.currentTimeMillis());
+			long spellcheckTime = System.currentTimeMillis();
 			String[] spellCheck = spellCheck(words);
-			System.out.println("SPELLCHECK AFTER: " + System.currentTimeMillis());
+			System.out.println("SPELLCHECK TIME: " + (System.currentTimeMillis() - spellcheckTime));
 
 			if (all_stopwords(spellCheck)) {
 				System.out.println("All stopwords!");
@@ -353,17 +353,17 @@ public class Search {
 
 			n_words = get_word_n(spellCheck);
 
-			System.out.println("COUNT BEFORE: " + System.currentTimeMillis());
+			long counttime = System.currentTimeMillis();
 			N = kvs.count("hosts");
-			System.out.println("COUNT AFTER: " + System.currentTimeMillis());
+			System.out.println("COUNT TIME: " + (System.currentTimeMillis() - counttime));
 
 			/*
 			 * 1. Building tf-idf map
 			 */
 
-			System.out.println("TIME 1 BEFORE: " + System.currentTimeMillis());
+			long time1 = System.currentTimeMillis();
 			Map<String, Double> tf_idfs = new HashMap<String, Double>();
-			System.out.println("TIME 1 AFTER: " + System.currentTimeMillis());
+			System.out.println("TIME 1: " + (System.currentTimeMillis() - time1));
 
 			for (String word : spellCheck) {
 
@@ -411,7 +411,7 @@ public class Search {
 			 * 2. Adding pageranks via weighted sum of logs
 			 */
 
-			System.out.println("TIME 2 BEFORE: " + System.currentTimeMillis());
+			long time2 = System.currentTimeMillis();
 			Map<Double, Set<String>> scores = new HashMap<Double, Set<String>>();
 
 			for (Entry<String, Double> entry : tf_idfs.entrySet()) {
@@ -448,7 +448,7 @@ public class Search {
 				}
 
 			}
-			System.out.println("TIME 2 AFTER: " + System.currentTimeMillis());
+			System.out.println("TIME 2: " + (System.currentTimeMillis() - time2));
 
 			/*
 			 * 3. Sort results & report
@@ -457,9 +457,9 @@ public class Search {
 			List<Double> ranking = new LinkedList<Double>();
 			ranking.addAll(scores.keySet());
 
-			System.out.println("SORT BEFORE: " + System.currentTimeMillis());
+			long sortTime = System.currentTimeMillis();
 			ranking = sortTopN(ranking, n_results);
-			System.out.println("SORT AFTER: " + System.currentTimeMillis());
+			System.out.println("Sort Time: " + (System.currentTimeMillis() - sortTime));
 
 			List<String> results = poll_results(ranking, scores, n_results);
 
@@ -480,7 +480,7 @@ public class Search {
 				json.put("spellcheck", spellCheck);
 			}
 			json.put("results", urlAndPage);
-			System.out.println("END: " + System.currentTimeMillis());
+			System.out.println("TOTAL TIME: " + (System.currentTimeMillis() - startstime));
 			return convertMapToJson(json);
 		});
 
