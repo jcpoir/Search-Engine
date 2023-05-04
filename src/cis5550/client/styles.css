@@ -87,6 +87,40 @@ footer {
     margin-top: 3rem;
 }
 
+/* search results */
+/* Styles for the search results */
+ul#result-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  
+  .search-result {
+    margin: 20px 0;
+  }
+  
+  .search-result h3 {
+    font-size: 18px;
+    margin: 0;
+    line-height: 1.3;
+  }
+  
+  .search-result a {
+    color: #1a0dab;
+    text-decoration: none;
+  }
+  
+  .search-result a:hover {
+    text-decoration: underline;
+  }
+  
+  .search-result p {
+    font-size: 14px;
+    margin: 5px 0 0;
+    line-height: 1.5;
+    color: #70757a;
+  }
+
 /* category buttons */
 .category-buttons {
     display: flex;

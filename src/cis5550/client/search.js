@@ -22,44 +22,55 @@ async function search(event, page = 1, isCategory = false, category = "") {
     searchResults.removeChild(searchResults.firstChild);
   }
 
+  console.log(searchValue)
+
   try {
     const itemsPerPage = 10;
     const startIndex = (page - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
 
     // TODO: replace with correct url
-    // // Replace the URL with your Java server's URL
-    // const serverUrl = 'https://your-java-server-url.com';
+    // Replace the URL with your Java server's URL
+    const serverUrl = 'http://localhost:8080';
 
-    // // Use Axios to make a GET request to your Java server's API endpoint
-    // const response = await axios.get(`${serverUrl}/api/search`, {
+    // Use Axios to make a GET request to your Java server's API endpoint
+    // const response = await axios.get(`${serverUrl}/search`, {
     //   params: {
-    //     q: searchValue,
+    //     query: encodeURIComponent(searchValue),
     //   },
     // });
 
-    // const data = response.data;
-
+    // let data = response.data
+    const spellcheck = dummyNew.spellcheck;
+    data = dummyNew.results;
     // start for dummy generateion, remove after url inplemented
-    let data;
-    if (searchValue == "2") {
-      data = dummyData2;
-    } else if (searchValue == "3") {
-      data = dummyData3;
-    } else if (searchValue == "long") {
-      data = dummyDataLong;
-    } else if (searchValue == "books") {
-      data = dummyDataBooks;
-    } else if (searchValue == "music") {
-      data = dummyDataMusic;
-    } else if (searchValue == "sports") {
-      data = dummyDataSports;
-    } else if (searchValue == "travel") {
-      data = dummyDataTravel;
-    } else {
-      data = dummyData1;
-    }
+    // let data;
+    // if (searchValue == "2") {
+    //   data = dummyData2;
+    // } else if (searchValue == "3") {
+    //   data = dummyData3;
+    // } else if (searchValue == "long") {
+    //   data = dummyDataLong;
+    // } else if (searchValue == "books") {
+    //   data = dummyDataBooks;
+    // } else if (searchValue == "music") {
+    //   data = dummyDataMusic;
+    // } else if (searchValue == "sports") {
+    //   data = dummyDataSports;
+    // } else if (searchValue == "travel") {
+    //   data = dummyDataTravel;
+    // } else {
+    //   data = dummyData1;
+    // }
     // end for dummy generateion
+
+    if (spellcheck) {
+      
+      const message = `Showing search results for "${spellcheck}"`;
+      const messageElement = document.getElementById("search-results-message");
+      messageElement.innerHTML = message;
+      console.log('why', messageElement.innerHTML)
+    }
 
     const results = data.slice(startIndex, endIndex);
     const totalPages = Math.ceil(data.length / itemsPerPage);
@@ -72,25 +83,26 @@ async function search(event, page = 1, isCategory = false, category = "") {
       // Create a new list item element
       const listItem = document.createElement("li");
       listItem.classList.add("search-result");
-
+    
       // Create a new heading element for the search result title, with a link to the full article
       const title = document.createElement("h3");
       const link = document.createElement("a");
       link.href = result.url;
-      link.textContent = result.url;
+      link.textContent = result.title;
       title.appendChild(link);
-
+    
       // Create a new paragraph element for the search result description
       const description = document.createElement("p");
-      description.textContent = result.page;
-
+      description.textContent = result.description;
+    
       // Add the title and description to the list item
       listItem.appendChild(title);
       listItem.appendChild(description);
-
+    
       // Add the list item to the unordered list of search results
       resultList.appendChild(listItem);
     });
+    
 
     // Add the unordered list of search results to the page
     searchResults.appendChild(resultList);
@@ -118,11 +130,59 @@ async function search(event, page = 1, isCategory = false, category = "") {
   }
 }
 
+const dummyNew = {
+  "spellcheck": "brown basketball",
+  "results": [
+     {
+        "title": "\n\tMen\u0027s Basketball Club 2021-2022 - Brown University Recreation\n",
+        "url": "https://brownrec.com:443/sports/2021/7/7/mens-basketball-club-2021-2022"
+     },
+     {
+        "title": "\n\tMen\u0027s Basketball - Brown University Athletics\n",
+        "url": "https://brownbears.com:443/sports/mens-basketball"
+     },
+     {
+        "title": "\n\t2017-18 Men\u0027s Basketball Roster - Brown University Recreation\n",
+        "url": "https://brownrec.com:443/sports/mens-basketball/roster/2017-18"
+     },
+     {
+        "title": "\n\tMen\u0027s Basketball - Story Archives - Cornell University Athletics\n",
+        "url": "https://cornellbigred.com:443/sports/mens-basketball/archives"
+     },
+     {
+        "title": "\n\tWomen\u0027s Basketball - Story Archives - Cornell University Athletics\n",
+        "url": "https://cornellbigred.com:443/sports/womens-basketball/archives"
+     },
+     {
+        "title": "Hilary Silver’s homelessness documentary to premiere on PBS | News from Brown",
+        "url": "https://news.brown.edu:443/articles/2015/11/homelessness"
+     },
+     {
+        "title": "A better method for making perovskite solar cells | News from Brown",
+        "url": "https://news.brown.edu:443/articles/2015/03/perovskite"
+     },
+     {
+        "title": "Brown University honors veterans | News from Brown",
+        "url": "https://news.brown.edu:443/articles/2015/11/veterans"
+     },
+     {
+        "title": "Novel support for brain science theory with deep Brown roots | News from Brown",
+        "url": "https://news.brown.edu:443/articles/2015/11/learning"
+     },
+     {
+        "title": "Aging cells lose their grip on DNA rogues | News from Brown",
+        "url": "https://news.brown.edu:443/articles/2013/01/senescence"
+     }
+  ]
+}
+
+
 const dummyDataLong = Array.from({ length: 200 }, (_, i) => {
   const page = Math.floor(i / 10) + 1;
   return {
     url: `https://example.com/result/${i + 1}`,
-    page: `This is a dummy description for the result item ${page}`,
+    title: `Dummy title for the result item ${page}, ${i + 1}`,
+    description: `This is a dummy description for the result item ${page}, ${i + 1}: xxxxxxxxxxxxxxxxx...`,
   };
 });
 
