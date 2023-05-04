@@ -26,6 +26,7 @@ import java.net.URLDecoder;
 import cis5550.flame.FlameContext;
 import cis5550.kvs.KVSClient;
 import cis5550.tools.Stemmer;
+import cis5550.tools.URLParser;
 import cis5550.tools.Hasher;
 
 import cis5550.webserver.Server;
@@ -214,22 +215,26 @@ public class Search {
 	}
 
 	public static String getSearchTermsPreview(String htmlContent, String[] searchTerms) {
+		int previewLength = 100;
 		StringBuilder previewBuilder = new StringBuilder();
 
 		for (String searchTerm : searchTerms) {
-			Pattern pattern = Pattern.compile("(?i)" + searchTerm);
+			Pattern pattern = Pattern.compile("(?i)<p>.*?" + searchTerm + ".*?</p>");
 			Matcher matcher = pattern.matcher(htmlContent);
 
-			while (matcher.find()) {
+			if (matcher.find()){
 				int matchStart = matcher.start();
 				int matchEnd = matcher.end();
 
-				int previewStart = Math.max(0, matchStart - 20); // Start the preview 20 characters before the match
-				int previewEnd = Math.min(htmlContent.length(), matchEnd + 20); // End the preview 20 characters after the match
+				int previewStart = Math.max(0, matchStart - previewLength / 2); // Start the preview 20 characters before the match
+				int previewEnd = Math.min(htmlContent.length(), matchEnd + previewLength / 2); // End the preview 20 characters after the match
 
 				String previewText = htmlContent.substring(previewStart, previewEnd);
-				previewBuilder.append("...").append(previewText).append("... ");
-			}
+				// Remove any HTML tags from the previewText
+				previewText = previewText.replaceAll("\\<.*?\\>", "");
+
+				previewBuilder.append("...").append(previewText).append("... ");			}
+		
 		}
 
 		return previewBuilder.toString().trim();
@@ -467,11 +472,11 @@ public class Search {
 
 			for (String url : results) {
 				Map<String, String> map = new HashMap<>();
+				map.put("domain", URLParser.parseURL(url)[1]);
 				map.put("url", url);
 				byte[] htmlContentsBytes = kvs.get("crawl_old", Hasher.hash(url), "page");
 				String htmlString = new String(htmlContentsBytes);
 				map.put("title", getPageTitle(htmlString));
-				// map.put("preview", getSearchTermsPreview(htmlString, words));
 				urlAndPage.add(map);
 			}
 
