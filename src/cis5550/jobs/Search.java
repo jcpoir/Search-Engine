@@ -34,7 +34,7 @@ import cis5550.webserver.Server;
 public class Search {
 	
 	static double pagerank_weight = 0.1; static double tf_idf_weight = 0.9; static double stopword_penalty = 0.05;
-	static double URL_bonus = 20; static int n_results = 10;
+	static double URL_bonus = 20; static int n_results = 200;
 	static Stemmer stemmer; static String delimiter1 = "\\^"; static String delimiter2 = "~"; 
 	public static double N = -1; public static int df = -1; public static double n_words = -1;
 	static boolean ignore_stopwords = true;
@@ -312,7 +312,7 @@ public class Search {
 					// Replace the misspelled word with the top suggestion using replaceAll
 					for (int i = 0; i < spellCheckedWordsList.size(); i++) {
 							if (spellCheckedWordsList.get(i).equals(token)) {
-									spellCheckedWordsList.set(i, topSuggestion);
+									spellCheckedWordsList.set(i, topSuggestion.toLowerCase());
 							}
 					}
 				} 
