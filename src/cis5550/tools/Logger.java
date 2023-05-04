@@ -1,9 +1,6 @@
 package cis5550.tools;
 
 import java.util.*;
-
-import cis5550.tools.Logger;
-
 import java.io.*;
 import java.text.SimpleDateFormat;
 

@@ -1,300 +1,360 @@
 package cis5550.jobs;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
 import cis5550.flame.FlameContext;
-import cis5550.flame.FlamePair;
-import cis5550.flame.FlamePairRDD;
-import cis5550.flame.FlameRDD;
-import cis5550.flame.FlameContext.RowToString;
-import cis5550.flame.FlamePairRDD.PairToPairIterable;
-import cis5550.flame.FlamePairRDD.PairToStringIterable;
-import cis5550.flame.FlamePairRDD.TwoStringsToString;
-import cis5550.flame.FlameRDD.StringToPair;
 import cis5550.kvs.KVSClient;
+import cis5550.kvs.Row;
+import cis5550.tools.EnglishFilter;
+
+// import static cis5550.jobs.Crawler.*;
+
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Random;
 
 public class PageRank {
-  private static String[] parseURL(String url) {
-    String result[] = new String[4];
-    int slashslash = url.indexOf("//");
-    if (slashslash > 0) {
-      result[0] = url.substring(0, slashslash - 1);
-      int nextslash = url.indexOf('/', slashslash + 2);
-      if (nextslash >= 0) {
-        result[1] = url.substring(slashslash + 2, nextslash);
-        result[3] = url.substring(nextslash);
-      } else {
-        result[1] = url.substring(slashslash + 2);
-        result[3] = "/";
-      }
-      int colonPos = result[1].indexOf(':');
-      if (colonPos > 0) {
-        result[2] = result[1].substring(colonPos + 1);
-        result[1] = result[1].substring(0, colonPos);
-      }
-    } else {
-      result[3] = url;
-    }
+	
+	public static float DECAY = (float) 0.85; public static float CONV_THRESH = (float) 0.01; public static float CONV_P = (float) 0.8;
+	
+	public static String randomName() {
+		
+		// (1) Pick a table name (using hash)
+		String tabname = ""; Random r = new Random();
+		
+		// generate a unique ID string of 20 ASCII characters by generating random ints and casting to char
+		for (int i = 0; i < 50; i++) {
+			tabname = tabname + (char) (r.nextInt(26) + 'a');
+		}
+		
+		return tabname;
+	}
+	
+	public static String removeDocFrag(String url) {
+		if (url.startsWith("#")) {return null;}
+		String out = url.split("#")[0]; return out; // isolate secion of the url before pound sign
+	}
+	
+	public static String[] parseURL(String url) {
+	    String result[] = new String[4];
+	    int slashslash = url.indexOf("//");
+	    if (slashslash>0) {
+	      result[0] = url.substring(0, slashslash-1);
+	      int nextslash = url.indexOf('/', slashslash+2);
+	      if (nextslash>=0) {
+	        result[1] = url.substring(slashslash+2, nextslash);
+	        result[3] = url.substring(nextslash);
+	      } else {
+	        result[1] = url.substring(slashslash+2);
+	        result[3] = "/";
+	      }
+	      int colonPos = result[1].indexOf(':');
+	      if (colonPos > 0) {
+	        result[2] = result[1].substring(colonPos+1);
+	        result[1] = result[1].substring(0, colonPos);
+	      }
+	    } else {
+	      result[3] = url;
+	    }
 
-    return result;
-  }
+	    return result;
+	  }
 
-  private static String cleanURL(String url, String[] parseURL) {
-    String replaceURL = url;
-    // Remove hashtags
-    if (replaceURL.contains("#")) {
-      replaceURL = replaceURL.split("#")[0];
-      if (replaceURL == null || url.length() == 0) {
-        return null;
-      }
-    }
+	public static String compToURL(String[] components) {
+		
+		String protocol = components[0]; String hostname = components[1]; String port = components[2]; String path = components[3];
+		
+		if (!Objects.isNull(protocol)) {protocol = protocol + "://";} else {protocol = "";}
+		if (Objects.isNull(hostname)) {hostname = "";}
+		if (!Objects.isNull(port)) {port =  ":" + port;} else {port = "";}
+		if (Objects.isNull(path)) {path = "";}
+	
+		return protocol + hostname + port + path;
+	}
+	
+	public static List<String> getURLs(String term, String protocol) {
+		
+		List<String> URLs = new LinkedList<String>();
+		
+		// get individual words from file
+		String[] words = term.split("\n");
+		
+		for (String word : words) {
+			
+			// scan word looking for urls
+			if (word.contains("<") && word.contains(">")) {
+				
+				// split word by space & iterate
+				String[] sections = word.split(" ");
+				
+				for (String section : sections) {
+					
+					// if a secition starts with the href tag, isolate the url using a quote split
+					if (section.toLowerCase().startsWith("href=")) {
+						
+						String[] subSections = section.split("\"");
+						
+						if (subSections.length < 2) {continue;}
+						
+						// second split item will be the URL (first will be the "href=" tag itself)
+						String url = subSections[1];
+						
+						// add url iff (1) URL is not a banned filetype & (2) URL uses a valid protocol
+						if ((!url.endsWith(".jpg")) & (!url.endsWith(".jpeg")) & (!url.endsWith(".png")) & (!url.endsWith(".gif")) & (!url.endsWith(".txt")) & ("http".equals(protocol) | ("https").equals(protocol))) {URLs.add(subSections[1]);}
+					}
+				}
+			}
+		}
+		
+		return URLs;
+	}
+	
+	public static List<String> normalizeURLs(List<String> urls, String[] components) {
+		
+		List<String> norm_urls = new LinkedList<String>();
+		
+		for (String url: urls) {
+			
+			// remove pound sign and everything after it. If this eliminates full URL, don't record URL.
+			url = removeDocFrag(url);
+			if (Objects.isNull(url)) {continue;}
+			
+			
+			String[] components1 = parseURL(url);
+			
+			// if there are any empty components in the url, try to fill them with default values
+			int i = 0;
+			for (String component1 : components1) {
+				
+				if (i == 2) {
+					if (components1[0].equals("https")) {components1[2] = "443";}
+					else {components1[2] = "80";}
+				}
+				
+				// replace null components with corresponding components from parent url
+				else if (component1 == null) {components1[i] = components[i];}
+					
+				
+				else if (i == 3) {
+					
+					// if we get a "..", skip it
+					if (components1[i].startsWith("..")) {components1[i] = components1[i].substring(2);}
+					
+					// handle non-route html case (blah.html#test from handout)
+					else if (!components1[i].startsWith("/")) {
+						
+						// remove last element of path (to be replaced)
+						List<String> path_elements = Arrays.asList(components[i].split("/"));
+						
+						if (path_elements.size() > 0) {
 
-    if (url.equals("/")) {
-      StringBuilder builder = new StringBuilder();
-      builder.append(parseURL[0] + "://");
-      builder.append(parseURL[1] + ":" + parseURL[2]);
-      builder.append('/');
+							path_elements = path_elements.subList(0, path_elements.size() - 1);
+							
+							// reform string array, then join and concat new path element
+							components1[i] = String.join("/", path_elements) + "/" + components1[i];
+						}
+						
+						else {components1[i] = "/" + components1[i];}
 
-      replaceURL = builder.toString();
-      return replaceURL;
-    }
-
-    // Split the hyperlink by slashes
-    List<String> splitSlashesHyperlink = new ArrayList<>(Arrays.asList(replaceURL.split("/")));
-    // Split last part of url by slashes
-    List<String> splitSlashesOriginalURL = new ArrayList<>(Arrays.asList(parseURL[3].split("/")));
-    // Remove the first index
-    if (splitSlashesOriginalURL.size() > 0) {
-      splitSlashesOriginalURL.remove(0);
-    }
-
-    // Save the index to update the url from
-    int curIndexReplace = splitSlashesOriginalURL.size() - 1;
-    if (splitSlashesHyperlink.size() == 1) {
-      // Add to the url if there's nothing to replace or all has been replace
-      if (curIndexReplace == -1 || curIndexReplace >= splitSlashesOriginalURL.size()) {
-        splitSlashesOriginalURL.add(replaceURL);
-      } else {
-        splitSlashesOriginalURL.set(curIndexReplace, replaceURL);
-      }
-    } else {
-      for (String elem : splitSlashesHyperlink) {
-        if (elem.equals("..")) {
-          curIndexReplace -= 1;
-          continue;
-        } else if (elem.length() == 0) {
-          curIndexReplace = 0;
-          continue;
-        }
-        // Add to the url if there's nothing to replace or all has been replace
-        if (curIndexReplace >= splitSlashesOriginalURL.size()) {
-          splitSlashesOriginalURL.add(elem);
-        } else {
-          // Replace element of the current index
-          splitSlashesOriginalURL.set(curIndexReplace, elem);
-        }
-        curIndexReplace += 1;
-      }
-    }
-
-    // Delete remaining elements if new url has fewer elements than old
-    if (curIndexReplace < splitSlashesOriginalURL.size() && curIndexReplace >= 0) {
-      splitSlashesOriginalURL.subList(curIndexReplace, splitSlashesOriginalURL.size()).clear();
-    }
-
-    StringBuilder builder = new StringBuilder();
-    builder.append(parseURL[0] + "://");
-    builder.append(parseURL[1] + ":" + parseURL[2]);
-    for (String str : splitSlashesOriginalURL) {
-      builder.append("/" + str);
-    }
-    if (splitSlashesOriginalURL.size() == 0) {
-      builder.append("/");
-    }
-
-    replaceURL = builder.toString();
-    return replaceURL;
-  }
-
-  private static String cleanCompleteURL(String url) {
-    String[] parseHyperlink = parseURL(url);
-
-    if (parseHyperlink[0] == null || (!parseHyperlink[0].equals("http") && !parseHyperlink[0].equals("https"))) {
-      return null;
-    }
-
-    if (parseHyperlink[3] == null) {
-      return null;
-    }
-    String[] splitSlashes = parseHyperlink[3].split("/");
-    if (splitSlashes.length > 1) {
-      String[] getFileExtension = splitSlashes[splitSlashes.length - 1].split("\\.");
-      if (getFileExtension.length > 1) {
-        HashSet<String> prohibitedFileExtensions = new HashSet<String>(Set.of("jpg", "jpeg", "gif", "png", "txt"));
-        if (prohibitedFileExtensions.contains(getFileExtension[getFileExtension.length - 1])) {
-          return null;
-        }
-      }
-    }
-
-    if (parseHyperlink[2] == null) {
-      if (parseHyperlink[0].equals("http")) {
-        parseHyperlink[2] = "80";
-      } else {
-        parseHyperlink[2] = "443";
-      }
-    }
-
-    StringBuilder builder = new StringBuilder();
-    builder.append(parseHyperlink[0] + "://");
-    builder.append(parseHyperlink[1] + ":" + parseHyperlink[2]);
-    builder.append(parseHyperlink[3]);
-
-    return builder.toString();
-  }
-
-  private static List<String> getURLsFromPage(String html, String originalUrl) {
-    Set<String> urls = new HashSet<>();
-    Pattern pattern = Pattern.compile("<a\\s+href=\"([^\"]*)\"[^>]*>");
-    Matcher matcher = pattern.matcher(html);
-
-    String[] parseURL = parseURL(originalUrl);
-    while (matcher.find()) {
-      String url = matcher.group(1);
-      if (parseURL(url)[0] != null) {
-        url = cleanCompleteURL(url);
-      } else {
-        url = cleanURL(url, parseURL);
-      }
-
-      if (url != null) {
-        urls.add(url);
-      }
-    }
-
-    List<String> toReturn = new ArrayList<>();
-    toReturn.addAll(urls);
-
-    return toReturn;
-  }
-
-  public static void run(FlameContext context, String[] args) throws Exception {
-    RowToString firstLambda = row -> {
-      return row.get("url") + "," + row.get("page");
-    };
-    StringToPair secondLambda = str -> {
-      String[] splitString = str.split(",", 2);
-      List<String> itemList = getURLsFromPage(splitString[1], splitString[0]);
-      StringBuilder builder = new StringBuilder();
-      builder.append("1.0,1.0");
-      for (String item : itemList) {
-        builder.append(',');
-        builder.append(item);
-      }
-      return new FlamePair(splitString[0], builder.toString());
-    };
-
-    // Get all hyperlinks of a page for pagerank
-    FlameRDD rdd = context.fromTable("crawl", firstLambda);
-    FlamePairRDD stateTable = rdd.mapToPair(secondLambda);
-
-    while (true) {
-      // Calculate the portion of rank given for each page's child pages
-      PairToPairIterable p2p = pair -> {
-        List<FlamePair> pairList = new ArrayList<>();
-
-        String[] splitString = pair._2().split(",");
-        double curRank = Double.parseDouble(splitString[0]);
-
-        double numElems = splitString.length - 2;
-        double v = 0.85 * (curRank / numElems);
-        pairList.add(new FlamePair(pair._1(), Double.toString(0.0)));
-        for (int i = 2; i < splitString.length; i++) {
-          String curURL = splitString[i];
-          pairList.add(new FlamePair(curURL, Double.toString(v)));
-        }
-
-        return pairList;
-      };
-      FlamePairRDD noAggregatedTransferTable = stateTable.flatMapToPair(p2p);
-
-      // Group the pages from above to find new pagerank
-      TwoStringsToString aggregateTransfers = (first, second) -> {
-        double accumulator = Double.parseDouble(first);
-        double curVal = Double.parseDouble(second);
-
-        return Double.toString(accumulator + curVal);
-      };
-      FlamePairRDD transferTable = noAggregatedTransferTable.foldByKey(Double.toString(0.15), aggregateTransfers);
-
-      // Join old table with new to update state
-      FlamePairRDD joined = stateTable.join(transferTable);
-      PairToPairIterable p2pJoin = pair -> {
-        List<FlamePair> list = new ArrayList<>();
-
-        String[] items = pair._2().split(",");
-        items[1] = items[0];
-        items[0] = items[items.length - 1];
-
-        StringBuilder builder = new StringBuilder();
-        builder.append(items[0]);
-        for (int i = 1; i < items.length - 1; i++) {
-          builder.append(',');
-          builder.append(items[i]);
-        }
-
-        list.add(new FlamePair(pair._1(), builder.toString()));
-        return list;
-      };
-      stateTable = joined.flatMapToPair(p2pJoin);
-
-      // Find differences between previous and current
-      PairToStringIterable difference = pair -> {
-        List<String> string = new ArrayList<>();
-
-        String[] split = pair._2().split(",");
-        double diff = Double.parseDouble(split[0]) - Double.parseDouble(split[1]);
-        diff = Math.abs(diff);
-
-        string.add(Double.toString(diff));
-        return string;
-      };
-      FlameRDD differences = stateTable.flatMap(difference);
-
-      // Find max difference
-      TwoStringsToString findMaxDif = (first, second) -> {
-        double firstDouble = Double.parseDouble(first);
-        double secondDouble = Double.parseDouble(second);
-
-        double max = Math.max(firstDouble, secondDouble);
-        return Double.toString(max);
-      };
-      double maxDifference = Double.parseDouble(differences.fold(Double.toString(-1), findMaxDif));
-
-      // Terminate if converge
-      double convergenceThreshold = Double.parseDouble(args[0]);
-      if (maxDifference < convergenceThreshold) {
-        break;
-      }
-
-    }
-
-    // Add it to the table
-    String master = context.getKVS().getMaster();
-    PairToPairIterable saveResultIterable = pair -> {
-      KVSClient client = new KVSClient(master);
-      String rank = pair._2().split(",")[0];
-      client.put("pageranks", pair._1(), "rank", rank);
-
-      return new ArrayList<>();
-    };
-    stateTable.flatMapToPair(saveResultIterable);
-
-  }
+					}
+				
+				}
+				i++;
+			}
+			
+			// add normalized url
+			// System.out.println(url + " => " + compToURL(components1));
+			norm_urls.add(compToURL(components1));
+		}
+		
+		return norm_urls;
+	}
+	
+	public static void run(FlameContext ctx, String[] args) throws FileNotFoundException, IOException {
+		
+		/*
+		 * Initialize State Table
+		 */
+		
+		// Unpack command line threshold, proportion
+		if (args.length >= 1) {CONV_THRESH = Float.parseFloat(args[0]);}
+		if (args.length >= 2) {CONV_P = Float.parseFloat(args[1]+".0") / 100;}
+		
+		String prTabName = "pageranks_temp";
+		
+		// Initialize key-value-store client using KVS Master address
+		KVSClient kvs = new KVSClient("Localhost:8000"); kvs.delete("transfer");
+		
+		boolean initialize = false;
+		
+		if (initialize) {
+			
+			kvs.delete(prTabName);
+		
+			// Use kvs to get the crawl table
+			Iterator<Row> crawlTable = kvs.scan("crawl");
+			
+			// Iterate through the crawl table, extracting urls from page data
+			while (crawlTable.hasNext()) {
+				
+				// Get next row, get page data
+				Row row = crawlTable.next(); String page = row.get("page"); String url = row.get("url");
+				
+				if (Objects.isNull(page) | Objects.isNull(url) | Objects.isNull(EnglishFilter.filter(url))) {continue;}
+				
+				
+				page = page.toLowerCase(); url = url.toLowerCase();
+				
+				// Get components of current URL
+				String[] components = parseURL(url);
+				
+				// Use crawler method to extract URLs
+				List<String> urls_ = normalizeURLs(getURLs(page, "https"), components);
+				String urls = String.join(",", urls_);
+				
+				try {
+					kvs.put(prTabName, url, "rank0", "1.0"); 
+					kvs.put(prTabName, url, "rank1", "1.0"); 
+					kvs.put(prTabName, url, "n", "" + urls_.size());
+					kvs.put(prTabName, url, "url", urls);
+				}
+				catch (Exception e) {
+					System.out.println("[403 ERROR] Route Forbidden: " + url);
+				}
+			}
+		}
+		
+		String transTabName = "transfer";
+		
+		for (int i = 0; i < 1000; i++) {
+			
+			/*
+			 * Compute Transfer Table
+			 */
+			
+			System.out.println("EPOCH: " + i);
+			
+			// Use kvs to get the transfer table
+			Iterator<Row> transfer = kvs.scan(prTabName);
+			
+			int url_num = 0;
+			
+			while (transfer.hasNext()) {
+				
+				url_num++;
+				
+				// for each entry in state table get links, ranks
+				Row row = transfer.next(); String url = row.key(); String urls = row.get("url"); String[] url_arr = urls.split(","); float rank1 = Float.parseFloat(row.get("rank1"));
+				
+				System.out.println("(" + url_num + ") url: " + url + " url_arr.length: " + url_arr.length + " rank1: " + rank1);
+				
+				// Only perform algo on linked pages that are in the original table
+				List<String> linked = new LinkedList<String>();
+				
+				for (String out_url : url_arr) {
+					if (!Objects.isNull(kvs.get(prTabName, out_url,  "n"))) {
+						linked.add(out_url);
+					}
+				}
+				
+				int n = linked.size();
+				
+				if (n == 0) {continue;}
+				
+				float val = rank1 / n * DECAY; 
+				System.out.println(rank1 + " => " + val);
+				
+				for (String out_url : linked) {
+					
+					if (out_url.isEmpty()) {continue;}
+					
+					// add rows to transfer table
+					byte[] curr = kvs.get(transTabName, out_url, "val");
+					
+					try {
+					
+					// if there is a current value in the table,
+					if (!Objects.isNull(curr)) {
+						kvs.put(transTabName, out_url, "val", "" + (Float.parseFloat(new String(curr)) + val));
+					}
+					else {kvs.put(transTabName, out_url, "val", "" + val);}
+					}
+					
+					catch (Exception e) {
+						continue;
+					}
+				}
+			}
+			
+			/*
+			 * Update State table & check convergence
+			 */
+			
+			int n_converged = 0; int n = 0;
+			
+			Iterator<Row> state = kvs.scan(prTabName);
+			
+			while(state.hasNext()) {
+				
+				// get info from each row
+				Row row = state.next(); String url = row.key(); String rank0 = row.get("rank1"); 
+				
+				// get new rank from transfer table and deposit in rank1
+				byte[] rank1 = kvs.get(transTabName, url, "val"); if (Objects.isNull(rank1)) {rank1 = "0".getBytes();}
+				
+				// add new rank to state table. Also, add 0.15 rank to each source url.
+				float r = Float.parseFloat(new String(rank1)); r = (float) (r + 0.15); rank1 = String.valueOf(r).getBytes();
+				
+				try {
+					kvs.put(prTabName, url, "rank0", rank0);
+					kvs.put(transTabName, url, "val", "0"); // reset all transfer values to zero
+					kvs.put(prTabName, url, "rank1", rank1);
+				}
+				
+				catch (Exception e) {
+					System.out.println("[403 ERROR] Route Forbidden: " + url);
+				}
+				
+				// convergence check
+				float r1 = Float.parseFloat(new String(rank1)); float r0 = Float.parseFloat(new String(rank0));
+				float diff = Math.abs(r1 - r0);
+				
+				// track the number of URLs that have converged
+				n++; if (diff < CONV_THRESH) {n_converged++; System.out.println("[✓] " + url + ":" + diff);} 
+				else {System.out.println("[✗] " + url + ":" + diff);}
+				
+			}
+			
+			if (((float) n_converged / (float) n) >= CONV_P) {System.out.println("CONVERGENCE !!! p = " + n_converged + "/" + n); break;}
+			else {System.out.println("No convergence: p = " + n_converged + "/" + n);}
+		}
+		
+		/*
+		 * Export results to pagerank table
+		 */
+		
+		String finalTabName = "pageranks";
+		kvs.persist(finalTabName);
+		
+		Iterator<Row> state = kvs.scan(prTabName);
+		
+		while(state.hasNext()) {
+			
+			// get info from row
+			Row row = state.next(); String url = row.key(); String rank = row.get("rank1");
+			
+			// add info to final table
+			try {
+				kvs.put(finalTabName, url, "rank", rank);
+			}
+			catch (Exception e) {
+				System.out.println("[403 ERROR] Route Forbidden: " + url);
+			}
+		}
+		
+		ctx.output("OK");
+	}
 }
