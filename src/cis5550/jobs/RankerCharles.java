@@ -1,6 +1,7 @@
 package cis5550.jobs;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -19,6 +20,7 @@ import cis5550.flame.FlameRDD.StringToIterable;
 import cis5550.kvs.KVSClient;
 import cis5550.kvs.Row;
 import cis5550.tools.Hasher;
+import cis5550.tools.Stemmer;
 
 public class RankerCharles {
   static double pagerank_weight = 0.9;
