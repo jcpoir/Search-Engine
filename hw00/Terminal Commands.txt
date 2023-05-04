@@ -57,7 +57,10 @@ java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:crawler.jar cis5550.flame.F
 == Search ==
 
 Compile:
-javac -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:search.jar --source-path src src/cis5550/jobs/Search.java; cd bin; jar -cf Search.jar cis5550/jobs/Search.class cis5550/tools/; cd ..; mv bin/Search.jar Search.jar;
+javac -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:lib/gson-2.10.1.jar --source-path src src/cis5550/jobs/Search.java 
+cd src 
+jar -cf Search.jar cis5550/jobs/Search.class
+Manually move Search.jar into the lib directory
 
 Start:
-java -cp lib/kvs.jar:lib/webserver.jar:lib/flame.jar:crawler.jar cis5550.flame.FlameSubmit localhost:9000 search.jar cis5550.jobs.Search localhost:8000 the_titanic_is_sinking
+java -cp lib/flame.jar:lib/gson-2.10.1.jar:lib/kvs.jar:lib/Search.jar:lib/webserver.jar:lib/tools.jar cis5550.jobs.Search localhost:8000 8080

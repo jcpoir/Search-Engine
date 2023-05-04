@@ -1,5 +1,7 @@
 package cis5550.jobs;
 
+import com.google.gson.Gson;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -14,10 +16,16 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
 import java.util.Date;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.net.URLDecoder;
 
 import cis5550.flame.FlameContext;
 import cis5550.kvs.KVSClient;
 import cis5550.tools.Stemmer;
+import cis5550.tools.Hasher;
+
+import cis5550.webserver.Server;
 
 public class Search {
 	
@@ -50,7 +58,7 @@ public class Search {
 	
 	public static String[] split_stem(String query) {
 		
-		String[] out = query.toLowerCase().split("\\P{Alnum}+");
+		String[] out = query.toLowerCase().split("\\s+");
 		
 		for (int i = 0; i < out.length; i++) {
 			
@@ -177,109 +185,288 @@ public class Search {
 		return n;
 	}
 	
-	public static void run(FlameContext ctx, String[] args) throws IOException {
-		
-		long startTime = new Date().getTime();
-		
-		final String KVS_address = args[0];
-		
-		KVSClient kvs = new KVSClient(KVS_address);
-		
-		String query = args[1]; String[] words = split_stem(query); 
-		
-		if (all_stopwords(words)) {System.out.println("All stopwords!"); ignore_stopwords = false;}
-		
-		n_words = get_word_n(words);
-		
-		N = kvs.count("crawl");
-		
-		/*
-		 * 1. Building tf-idf map
-		 */
-		
-		Map<String,Double> tf_idfs = new HashMap<String,Double>();
-		
-		for (String word : words) {
-			
-			boolean stopword = is_stopword(word);
-			
-			if (ignore_stopwords & stopword) {continue;}
-			
-			byte[] documents_byte = kvs.get("index", word, "url"); if (Objects.isNull(documents_byte)) {continue;} 
-			
-			String documents_str = new String(documents_byte); String[] documents = documents_str.split(delimiter2);
-			
-			for (String document : documents) {
-				
-				df = documents.length;
-				
-				double tf_idf = calc_tf_idf(word, document);
-				
-				if (stopword) {tf_idf = tf_idf * stopword_penalty;}
-				
-				String[] info = document.split(delimiter1);
-				if (info.length < 2) {continue;}
-				String url = info[0];
-				
-				if (tf_idfs.containsKey(url)) {tf_idfs.put(url, tf_idfs.get(url) + tf_idf);}
-				
-				else {tf_idfs.put(url, tf_idf);}
-			}
-		}
-		
-		/*
-		 * 2. Adding pageranks via weighted sum of logs
-		 */
-		
-		Map<Double,Set<String>> scores = new HashMap<Double,Set<String>>();
-		
-		for (Entry<String,Double> entry : tf_idfs.entrySet()) {
-			
-			try {
-				String url = entry.getKey(); double tf_idf = entry.getValue();
-				
-				double pagerank = Double.parseDouble(new String(kvs.get("pageranks", url, "rank"))); 
-				double score = getScore(tf_idf, pagerank);
-				
-				try {
-					Map<String,String> url_data = analytics.get(url); 
-					url_data.put("pagerank", String.valueOf(pagerank));url_data.put("score", String.valueOf(score)); url_data.put("tf_idf", String.valueOf(tf_idf));
-					analytics.put(url, url_data);
-				} catch (Exception e) {}
-				
-				if (scores.containsKey(score)) {
-					Set<String> urls = scores.get(score); urls.add(url); scores.put(score, urls);
-				}
-				
-				else {
-					Set<String> urls = new HashSet<String>(); urls.add(url); scores.put(score, urls);
-				}
-			} catch (Exception e) {
-				continue;
-			}
-			
-		}
-		
-		/*
-		 * 3. Sort results & report
-		 */
-		
-		List<Double> ranking = new LinkedList<Double>(); ranking.addAll(scores.keySet());
-		
-		ranking = sortTopN(ranking, n_results);
+	public static String convertListToJson(List<Map<String, String>> list) {
+		// Create Gson instance
+		Gson gson = new Gson();
 
-		List<String> results = poll_results(ranking, scores, n_results);
-		
-		double timediff = (new Date().getTime() - startTime) / 1000.0;
-		
-		System.out.println("\n== RESULTS: " + query + " (" + tf_idfs.size() + " pages in " + timediff + "s) ==\n");
-		
-		int i = 1;
-		for (String result : results) {
-			Map<String,String> url_data = analytics.get(result);
-			System.out.format("(%d) %s\n tf('%s'): %s df('%s'): %s N: %s tf-idf: %s pagerank: %s score: %s\n\n", i, result, words[words.length-1], url_data.get("tf"), words[words.length-1], url_data.get("df"), String.valueOf(N), url_data.get("tf_idf"), url_data.get("pagerank"), url_data.get("score")); i++;
+		// Convert List to JSON
+		String json = gson.toJson(list);
+
+		return json;
+	}
+
+	public static String getSearchTermsPreview(String htmlContent, String[] searchTerms) {
+		StringBuilder previewBuilder = new StringBuilder();
+
+		for (String searchTerm : searchTerms) {
+			Pattern pattern = Pattern.compile("(?i)" + searchTerm);
+			Matcher matcher = pattern.matcher(htmlContent);
+
+			while (matcher.find()) {
+				int matchStart = matcher.start();
+				int matchEnd = matcher.end();
+
+				int previewStart = Math.max(0, matchStart - 20); // Start the preview 20 characters before the match
+				int previewEnd = Math.min(htmlContent.length(), matchEnd + 20); // End the preview 20 characters after the match
+
+				String previewText = htmlContent.substring(previewStart, previewEnd);
+				previewBuilder.append("...").append(previewText).append("... ");
+			}
 		}
+
+		return previewBuilder.toString().trim();
+	}
+
+	public static String getPageTitle(String htmlContent) {
+		Pattern pattern = Pattern.compile("<title>(.*?)</title>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+		Matcher matcher = pattern.matcher(htmlContent);
+
+		if (matcher.find()) {
+			String pageTitle = matcher.group(1);
+			return pageTitle;
+		}
+
+		return "";
+	}
+
+	public static void main(String[] args) throws IOException {
+		int portnumber = Integer.parseInt(args[1]);
+		Server.port(portnumber);
+
+		long startTime = new Date().getTime();
+		final String KVS_address = args[0];
+		KVSClient kvs = new KVSClient(KVS_address);
+
+		Server.get("/search", (req, res) -> {
+			res.header("Access-Control-Allow-Origin", "*");
+			res.header("Access-Control-Allow-Credentials", "true");
+
+			String query = URLDecoder.decode(req.queryParams("query"), "UTF-8");
+
+			String[] words = split_stem(query);
+
+			if (all_stopwords(words)) {
+				System.out.println("All stopwords!");
+				ignore_stopwords = false;
+			}
+
+			n_words = get_word_n(words);
+
+			N = kvs.count("hosts");
+
+			/*
+			 * 1. Building tf-idf map
+			 */
+
+			Map<String, Double> tf_idfs = new HashMap<String, Double>();
+
+			for (String word : words) {
+
+				boolean stopword = is_stopword(word);
+
+				if (ignore_stopwords & stopword) {
+					continue;
+				}
+
+				byte[] documents_byte = kvs.get("index_old", word, "url");
+				if (Objects.isNull(documents_byte)) {
+					continue;
+				}
+
+				String documents_str = new String(documents_byte);
+				String[] documents = documents_str.split(delimiter2);
+
+				for (String document : documents) {
+
+					df = documents.length;
+
+					double tf_idf = calc_tf_idf(word, document);
+
+					if (stopword) {
+						tf_idf = tf_idf * stopword_penalty;
+					}
+
+					String[] info = document.split(delimiter1);
+					if (info.length < 2) {
+						continue;
+					}
+					String url = info[0];
+
+					if (tf_idfs.containsKey(url)) {
+						tf_idfs.put(url, tf_idfs.get(url) + tf_idf);
+					}
+
+					else {
+						tf_idfs.put(url, tf_idf);
+					}
+				}
+			}
+
+			/*
+			 * 2. Adding pageranks via weighted sum of logs
+			 */
+
+			Map<Double, Set<String>> scores = new HashMap<Double, Set<String>>();
+
+			for (Entry<String, Double> entry : tf_idfs.entrySet()) {
+
+				try {
+					String url = entry.getKey();
+					double tf_idf = entry.getValue();
+
+					double pagerank = Double.parseDouble(new String(kvs.get("pageranks", url, "rank")));
+					double score = getScore(tf_idf, pagerank);
+
+					try {
+						Map<String, String> url_data = analytics.get(url);
+						url_data.put("pagerank", String.valueOf(pagerank));
+						url_data.put("score", String.valueOf(score));
+						url_data.put("tf_idf", String.valueOf(tf_idf));
+						analytics.put(url, url_data);
+					} catch (Exception e) {
+					}
+
+					if (scores.containsKey(score)) {
+						Set<String> urls = scores.get(score);
+						urls.add(url);
+						scores.put(score, urls);
+					}
+
+					else {
+						Set<String> urls = new HashSet<String>();
+						urls.add(url);
+						scores.put(score, urls);
+					}
+				} catch (Exception e) {
+					continue;
+				}
+
+			}
+
+			/*
+			 * 3. Sort results & report
+			 */
+
+			List<Double> ranking = new LinkedList<Double>();
+			ranking.addAll(scores.keySet());
+
+			ranking = sortTopN(ranking, n_results);
+
+			List<String> results = poll_results(ranking, scores, n_results);
+
+			List<Map<String, String>> urlAndPage = new LinkedList<>();
+
+			for (String url : results) {
+				Map<String, String> map = new HashMap<>();
+				map.put("url", url);
+				byte[] htmlContentsBytes = kvs.get("crawl_old", Hasher.hash(url), "page");
+				String htmlString = new String(htmlContentsBytes);
+				map.put("title", getPageTitle(htmlString));
+				// map.put("preview", getSearchTermsPreview(htmlString, words));
+				urlAndPage.add(map);
+			}
+
+			return convertListToJson(urlAndPage);
+		});
+
 		
-		ctx.output("OK");
+		
+		
+		// String query = args[1]; String[] words = split_stem(query); 
+		
+		// if (all_stopwords(words)) {System.out.println("All stopwords!"); ignore_stopwords = false;}
+		
+		// n_words = get_word_n(words);
+		
+		// N = kvs.count("crawl");
+		
+		// /*
+		//  * 1. Building tf-idf map
+		//  */
+		
+		// Map<String,Double> tf_idfs = new HashMap<String,Double>();
+		
+		// for (String word : words) {
+			
+		// 	boolean stopword = is_stopword(word);
+			
+		// 	if (ignore_stopwords & stopword) {continue;}
+			
+		// 	byte[] documents_byte = kvs.get("index", word, "url"); if (Objects.isNull(documents_byte)) {continue;} 
+			
+		// 	String documents_str = new String(documents_byte); String[] documents = documents_str.split(delimiter2);
+			
+		// 	for (String document : documents) {
+				
+		// 		df = documents.length;
+				
+		// 		double tf_idf = calc_tf_idf(word, document);
+				
+		// 		if (stopword) {tf_idf = tf_idf * stopword_penalty;}
+				
+		// 		String[] info = document.split(delimiter1);
+		// 		if (info.length < 2) {continue;}
+		// 		String url = info[0];
+				
+		// 		if (tf_idfs.containsKey(url)) {tf_idfs.put(url, tf_idfs.get(url) + tf_idf);}
+				
+		// 		else {tf_idfs.put(url, tf_idf);}
+		// 	}
+		// }
+		
+		// /*
+		//  * 2. Adding pageranks via weighted sum of logs
+		//  */
+		
+		// Map<Double,Set<String>> scores = new HashMap<Double,Set<String>>();
+		
+		// for (Entry<String,Double> entry : tf_idfs.entrySet()) {
+			
+		// 	try {
+		// 		String url = entry.getKey(); double tf_idf = entry.getValue();
+				
+		// 		double pagerank = Double.parseDouble(new String(kvs.get("pageranks", url, "rank"))); 
+		// 		double score = getScore(tf_idf, pagerank);
+				
+		// 		try {
+		// 			Map<String,String> url_data = analytics.get(url); 
+		// 			url_data.put("pagerank", String.valueOf(pagerank));url_data.put("score", String.valueOf(score)); url_data.put("tf_idf", String.valueOf(tf_idf));
+		// 			analytics.put(url, url_data);
+		// 		} catch (Exception e) {}
+				
+		// 		if (scores.containsKey(score)) {
+		// 			Set<String> urls = scores.get(score); urls.add(url); scores.put(score, urls);
+		// 		}
+				
+		// 		else {
+		// 			Set<String> urls = new HashSet<String>(); urls.add(url); scores.put(score, urls);
+		// 		}
+		// 	} catch (Exception e) {
+		// 		continue;
+		// 	}
+			
+		// }
+		
+		// /*
+		//  * 3. Sort results & report
+		//  */
+		
+		// List<Double> ranking = new LinkedList<Double>(); ranking.addAll(scores.keySet());
+		
+		// ranking = sortTopN(ranking, n_results);
+
+		// List<String> results = poll_results(ranking, scores, n_results);
+		
+		// double timediff = (new Date().getTime() - startTime) / 1000.0;
+		
+		// System.out.println("\n== RESULTS: " + query + " (" + tf_idfs.size() + " pages in " + timediff + "s) ==\n");
+		
+		// int i = 1;
+		// for (String result : results) {
+		// 	Map<String,String> url_data = analytics.get(result);
+		// 	System.out.format("(%d) %s\n tf('%s'): %s df('%s'): %s N: %s tf-idf: %s pagerank: %s score: %s\n\n", i, result, words[words.length-1], url_data.get("tf"), words[words.length-1], url_data.get("df"), String.valueOf(N), url_data.get("tf_idf"), url_data.get("pagerank"), url_data.get("score")); i++;
+		// }
+		
+		// ctx.output("OK");
 	}
 }
