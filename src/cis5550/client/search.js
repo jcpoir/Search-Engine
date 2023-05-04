@@ -22,6 +22,8 @@ async function search(event, page = 1, isCategory = false, category = "") {
     searchResults.removeChild(searchResults.firstChild);
   }
 
+  console.log(searchValue)
+
   try {
     const itemsPerPage = 10;
     const startIndex = (page - 1) * itemsPerPage;
@@ -29,36 +31,35 @@ async function search(event, page = 1, isCategory = false, category = "") {
 
     // TODO: replace with correct url
     // // Replace the URL with your Java server's URL
-    // const serverUrl = 'https://your-java-server-url.com';
+    const serverUrl = 'http://localhost:8080';
 
     // // Use Axios to make a GET request to your Java server's API endpoint
-    // const response = await axios.get(`${serverUrl}/api/search`, {
-    //   params: {
-    //     q: searchValue,
-    //   },
-    // });
+    const response = await axios.get(`${serverUrl}/search`, {
+      params: {
+        query: encodeURIComponent(searchValue),
+      },
+    });
 
-    // const data = response.data;
-
+    let data = response.data
     // start for dummy generateion, remove after url inplemented
-    let data;
-    if (searchValue == "2") {
-      data = dummyData2;
-    } else if (searchValue == "3") {
-      data = dummyData3;
-    } else if (searchValue == "long") {
-      data = dummyDataLong;
-    } else if (searchValue == "books") {
-      data = dummyDataBooks;
-    } else if (searchValue == "music") {
-      data = dummyDataMusic;
-    } else if (searchValue == "sports") {
-      data = dummyDataSports;
-    } else if (searchValue == "travel") {
-      data = dummyDataTravel;
-    } else {
-      data = dummyData1;
-    }
+    // let data;
+    // if (searchValue == "2") {
+    //   data = dummyData2;
+    // } else if (searchValue == "3") {
+    //   data = dummyData3;
+    // } else if (searchValue == "long") {
+    //   data = dummyDataLong;
+    // } else if (searchValue == "books") {
+    //   data = dummyDataBooks;
+    // } else if (searchValue == "music") {
+    //   data = dummyDataMusic;
+    // } else if (searchValue == "sports") {
+    //   data = dummyDataSports;
+    // } else if (searchValue == "travel") {
+    //   data = dummyDataTravel;
+    // } else {
+    //   data = dummyData1;
+    // }
     // end for dummy generateion
 
     const results = data.slice(startIndex, endIndex);
@@ -78,11 +79,12 @@ async function search(event, page = 1, isCategory = false, category = "") {
       const link = document.createElement("a");
       link.href = result.url;
       link.textContent = result.url;
+      title.textContent = result.title
       title.appendChild(link);
 
       // Create a new paragraph element for the search result description
       const description = document.createElement("p");
-      description.textContent = result.page;
+      description.textContent = result.preview;
 
       // Add the title and description to the list item
       listItem.appendChild(title);
