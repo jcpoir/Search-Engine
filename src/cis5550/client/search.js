@@ -34,17 +34,18 @@ async function search(event, page = 1, isCategory = false, category = "") {
     const serverUrl = 'http://localhost:8080';
 
     // Use Axios to make a GET request to your Java server's API endpoint
-    // const response = await axios.get(`${serverUrl}/search`, {
-    //   params: {
-    //     query: encodeURIComponent(searchValue),
-    //   },
-    // });
+    const response = await axios.get(`${serverUrl}/search`, {
+      params: {
+        query: encodeURIComponent(searchValue),
+      },
+    });
+    const spellcheck = response.data.spellcheck;
+    let data = response.data.results
 
-    // let data = response.data
-    const spellcheck = dummyNew.spellcheck;
-    data = dummyNew.results;
     // start for dummy generateion, remove after url inplemented
-    // let data;
+
+    // let data data = dummyNew.results;
+    
     // if (searchValue == "2") {
     //   data = dummyData2;
     // } else if (searchValue == "3") {
@@ -65,7 +66,6 @@ async function search(event, page = 1, isCategory = false, category = "") {
     // end for dummy generateion
 
     if (spellcheck) {
-      
       const message = `Showing search results for "${spellcheck}"`;
       const messageElement = document.getElementById("search-results-message");
       messageElement.innerHTML = message;
@@ -80,26 +80,43 @@ async function search(event, page = 1, isCategory = false, category = "") {
 
     // Loop through each search result and create a new list item for it
     results.forEach((result) => {
-      // Create a new list item element
-      const listItem = document.createElement("li");
-      listItem.classList.add("search-result");
+      // Create a new div element for the search result
+      const div = document.createElement("div");
+      div.classList.add("search-result");
     
-      // Create a new heading element for the search result title, with a link to the full article
-      const title = document.createElement("h3");
+      // Create a new heading element for the search result domain, with a favicon
+      const domain = document.createElement("h3");
+      const domainLink = document.createElement("a");
+      const favicon = document.createElement("img");
+      const domainUrl = new URL(result.url);
+      
+      domainLink.href = result.url;
+      domainLink.textContent = result.domain;
+      domain.appendChild(favicon);
+      domain.appendChild(domainLink);
+    
+      // Set the favicon source based on the domain of the search result
+      favicon.src = `https://s2.googleusercontent.com/s2/favicons?domain=${domainUrl.hostname}`;
+    
+      // Create a new paragraph element for the search result title, with a link to the full article
+      const title = document.createElement("p");
       const link = document.createElement("a");
       link.href = result.url;
       link.textContent = result.title;
       title.appendChild(link);
     
-      // Create a new paragraph element for the search result description
-      const description = document.createElement("p");
-      description.textContent = result.description;
+      // Create a new paragraph element for the search result URL
+      const url = document.createElement("p");
+      url.textContent = result.url;
     
-      // Add the title and description to the list item
-      listItem.appendChild(title);
-      listItem.appendChild(description);
+      // Add the domain, title, and URL to the search result div
+      div.appendChild(domain);
+      div.appendChild(title);
+      div.appendChild(url);
     
-      // Add the list item to the unordered list of search results
+      // Add the search result div to the unordered list of search results
+      const listItem = document.createElement("li");
+      listItem.appendChild(div);
       resultList.appendChild(listItem);
     });
     
@@ -135,11 +152,13 @@ const dummyNew = {
   "results": [
      {
         "title": "\n\tMen\u0027s Basketball Club 2021-2022 - Brown University Recreation\n",
-        "url": "https://brownrec.com:443/sports/2021/7/7/mens-basketball-club-2021-2022"
+        "url": "https://brownrec.com:443/sports/2021/7/7/mens-basketball-club-2021-2022",
+        "domain" : "https://brownrec.com"
      },
      {
         "title": "\n\tMen\u0027s Basketball - Brown University Athletics\n",
-        "url": "https://brownbears.com:443/sports/mens-basketball"
+        "url": "https://brownbears.com:443/sports/mens-basketball",
+        "domain" : "https://brownbears.com"
      },
      {
         "title": "\n\t2017-18 Men\u0027s Basketball Roster - Brown University Recreation\n",
