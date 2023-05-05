@@ -10,15 +10,20 @@ import cis5550.tools.EnglishFilter;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
+import java.util.Map;
+import java.util.Map.Entry;
 
 public class PageRank {
 	
-	public static float DECAY = (float) 0.85; public static float CONV_THRESH = (float) 0.01; public static float CONV_P = (float) 0.8;
+	public static String delimiter1 = "~";
+	
+	public static float DECAY = (float) 0.85; public static float CONV_THRESH = (float) 0.01; public static float CONV_P = (float) 0.98;
 	
 	public static String randomName() {
 		
@@ -176,35 +181,40 @@ public class PageRank {
 	public static void run(FlameContext ctx, String[] args) throws FileNotFoundException, IOException {
 		
 		/*
-		 * Initialize State Table
+		 * Initialize State
 		 */
 		
 		// Unpack command line threshold, proportion
 		if (args.length >= 1) {CONV_THRESH = Float.parseFloat(args[0]);}
 		if (args.length >= 2) {CONV_P = Float.parseFloat(args[1]+".0") / 100;}
 		
-		String prTabName = "pageranks_temp";
-		
 		// Initialize key-value-store client using KVS Master address
-		KVSClient kvs = new KVSClient("Localhost:8000"); kvs.delete("transfer");
+		KVSClient kvs = new KVSClient("Localhost:8000");
+
+		// state map (instead of table)
+		Map<String,Map<String,String>> state = new HashMap<String,Map<String,String>>();
 		
-		boolean initialize = false;
+		boolean initialize = true;
 		
 		if (initialize) {
-			
-			kvs.delete(prTabName);
 		
 			// Use kvs to get the crawl table
 			Iterator<Row> crawlTable = kvs.scan("crawl");
 			
+			int i = 1; System.out.println("\n== INITIALIZATION ==\n");
+			
 			// Iterate through the crawl table, extracting urls from page data
 			while (crawlTable.hasNext()) {
+				
+				System.out.println("Pages extracted: " + i); i++;
 				
 				// Get next row, get page data
 				Row row = crawlTable.next(); String page = row.get("page"); String url = row.get("url");
 				
-				if (Objects.isNull(page) | Objects.isNull(url) | Objects.isNull(EnglishFilter.filter(url))) {continue;}
+				if (i % 8 == 3) {continue;}
 				
+				if (Objects.isNull(page) | Objects.isNull(url)) {continue;}
+				if (Objects.isNull(EnglishFilter.filter(url))) {continue;}
 				
 				page = page.toLowerCase(); url = url.toLowerCase();
 				
@@ -213,49 +223,47 @@ public class PageRank {
 				
 				// Use crawler method to extract URLs
 				List<String> urls_ = normalizeURLs(getURLs(page, "https"), components);
-				String urls = String.join(",", urls_);
+				String urls = String.join(delimiter1, urls_);
 				
 				try {
-					kvs.put(prTabName, url, "rank0", "1.0"); 
-					kvs.put(prTabName, url, "rank1", "1.0"); 
-					kvs.put(prTabName, url, "n", "" + urls_.size());
-					kvs.put(prTabName, url, "url", urls);
+					Map<String, String> ref = new HashMap<String,String>();
+					ref.put("rank0", "1.0"); ref.put("rank1", "1.0"); ref.put("n", String.valueOf(urls_.size())); ref.put("url", urls);
+					state.put(url, ref);
 				}
 				catch (Exception e) {
 					System.out.println("[403 ERROR] Route Forbidden: " + url);
 				}
+				
 			}
 		}
 		
-		String transTabName = "transfer";
+		Map<String,Double> transfer = new HashMap<String,Double>();
 		
-		for (int i = 0; i < 1000; i++) {
+		for (int i = 0; i < 20; i++) {
 			
 			/*
 			 * Compute Transfer Table
 			 */
 			
-			System.out.println("EPOCH: " + i);
-			
-			// Use kvs to get the transfer table
-			Iterator<Row> transfer = kvs.scan(prTabName);
+			System.out.println("\n== EPOCH: " + i + " ==\n");
 			
 			int url_num = 0;
 			
-			while (transfer.hasNext()) {
+			for (Entry<String,Map<String,String>> entry : state.entrySet()) {
 				
 				url_num++;
 				
 				// for each entry in state table get links, ranks
-				Row row = transfer.next(); String url = row.key(); String urls = row.get("url"); String[] url_arr = urls.split(","); float rank1 = Float.parseFloat(row.get("rank1"));
-				
+				String url = entry.getKey(); Map<String,String> metrics = entry.getValue();
+				double rank1 = Double.parseDouble(metrics.get("rank1")); String urls = metrics.get("url"); String[] url_arr = urls.split(delimiter1);
+								
 				System.out.println("(" + url_num + ") url: " + url + " url_arr.length: " + url_arr.length + " rank1: " + rank1);
 				
 				// Only perform algo on linked pages that are in the original table
 				List<String> linked = new LinkedList<String>();
 				
 				for (String out_url : url_arr) {
-					if (!Objects.isNull(kvs.get(prTabName, out_url,  "n"))) {
+					if (state.containsKey(out_url)) {
 						linked.add(out_url);
 					}
 				}
@@ -264,28 +272,16 @@ public class PageRank {
 				
 				if (n == 0) {continue;}
 				
-				float val = rank1 / n * DECAY; 
-				System.out.println(rank1 + " => " + val);
+				double val = rank1 / n * DECAY; 
+				// System.out.println(rank1 + " => " + val);
 				
 				for (String out_url : linked) {
 					
-					if (out_url.isEmpty()) {continue;}
-					
-					// add rows to transfer table
-					byte[] curr = kvs.get(transTabName, out_url, "val");
-					
-					try {
-					
-					// if there is a current value in the table,
-					if (!Objects.isNull(curr)) {
-						kvs.put(transTabName, out_url, "val", "" + (Float.parseFloat(new String(curr)) + val));
-					}
-					else {kvs.put(transTabName, out_url, "val", "" + val);}
+					if (transfer.containsKey(out_url)) {
+						transfer.put(out_url, transfer.get(out_url) + val);
 					}
 					
-					catch (Exception e) {
-						continue;
-					}
+					else {transfer.put(out_url, val);}
 				}
 			}
 			
@@ -295,32 +291,25 @@ public class PageRank {
 			
 			int n_converged = 0; int n = 0;
 			
-			Iterator<Row> state = kvs.scan(prTabName);
-			
-			while(state.hasNext()) {
+			for (Entry<String,Map<String,String>> entry : state.entrySet()) {
 				
-				// get info from each row
-				Row row = state.next(); String url = row.key(); String rank0 = row.get("rank1"); 
+				String url = entry.getKey(); Map<String,String> metrics = entry.getValue();
+				double rank1 = Double.parseDouble(metrics.get("rank1")); String urls = metrics.get("url"); String[] url_arr = urls.split(delimiter1);
 				
 				// get new rank from transfer table and deposit in rank1
-				byte[] rank1 = kvs.get(transTabName, url, "val"); if (Objects.isNull(rank1)) {rank1 = "0".getBytes();}
+				double new_rank = 0;
+				if (transfer.containsKey(url)) {new_rank = transfer.get(url);}
 				
 				// add new rank to state table. Also, add 0.15 rank to each source url.
-				float r = Float.parseFloat(new String(rank1)); r = (float) (r + 0.15); rank1 = String.valueOf(r).getBytes();
+				new_rank = new_rank + 0.15;
 				
-				try {
-					kvs.put(prTabName, url, "rank0", rank0);
-					kvs.put(transTabName, url, "val", "0"); // reset all transfer values to zero
-					kvs.put(prTabName, url, "rank1", rank1);
-				}
+				metrics.put("rank0", String.valueOf(rank1)); metrics.put("rank1", String.valueOf(new_rank));
+				state.put(url, metrics);
 				
-				catch (Exception e) {
-					System.out.println("[403 ERROR] Route Forbidden: " + url);
-				}
+				transfer.put(url, 0.0);
 				
 				// convergence check
-				float r1 = Float.parseFloat(new String(rank1)); float r0 = Float.parseFloat(new String(rank0));
-				float diff = Math.abs(r1 - r0);
+				double diff = Math.abs(new_rank - rank1);
 				
 				// track the number of URLs that have converged
 				n++; if (diff < CONV_THRESH) {n_converged++; System.out.println("[✓] " + url + ":" + diff);} 
@@ -339,13 +328,10 @@ public class PageRank {
 		String finalTabName = "pageranks";
 		kvs.persist(finalTabName);
 		
-		Iterator<Row> state = kvs.scan(prTabName);
-		
-		while(state.hasNext()) {
+		for (Entry<String,Map<String,String>> entry : state.entrySet()) {
 			
-			// get info from row
-			Row row = state.next(); String url = row.key(); String rank = row.get("rank1");
-			
+			String url = entry.getKey(); Map<String,String> metrics = entry.getValue(); String rank = metrics.get("rank1");
+			 
 			// add info to final table
 			try {
 				kvs.put(finalTabName, url, "rank", rank);
