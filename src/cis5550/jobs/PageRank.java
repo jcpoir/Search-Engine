@@ -210,9 +210,7 @@ public class PageRank {
 				
 				// Get next row, get page data
 				Row row = crawlTable.next(); String page = row.get("page"); String url = row.get("url");
-				
-				if (i % 8 == 3) {continue;}
-				
+			
 				if (Objects.isNull(page) | Objects.isNull(url)) {continue;}
 				if (Objects.isNull(EnglishFilter.filter(url))) {continue;}
 				
