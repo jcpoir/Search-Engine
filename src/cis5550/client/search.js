@@ -22,8 +22,6 @@ async function search(event, page = 1, isCategory = false, category = "") {
     searchResults.removeChild(searchResults.firstChild);
   }
 
-  console.log(searchValue)
-
   try {
     const itemsPerPage = 10;
     const startIndex = (page - 1) * itemsPerPage;
@@ -65,9 +63,12 @@ async function search(event, page = 1, isCategory = false, category = "") {
     // }
     // end for dummy generateion
 
+
+    const messageElement = document.getElementById("search-results-message");
+    messageElement.innerHTML = "";
+
     if (spellcheck) {
       const message = `Showing search results for "${spellcheck}"`;
-      const messageElement = document.getElementById("search-results-message");
       messageElement.innerHTML = message;
       console.log('why', messageElement.innerHTML)
     }

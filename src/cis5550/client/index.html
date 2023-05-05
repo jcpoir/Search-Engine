@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Search Engine</title>
+    <title>Googel</title>
     <link rel="stylesheet" href="styles.css">
     <!--Axios import without npm-->
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
@@ -11,7 +11,7 @@
 </head>
 <body>
     <header>
-        <h1>Simple Search Engine</h1>
+        <h1>Googel</h1>
     </header>
     <script src="search.js"></script>
     <main>
@@ -33,12 +33,22 @@
 
         <nav>
             <div class="category-buttons">
-                <button class="category-button" data-category="books" onclick="categoryClicked(event, 'books')">Books</button>
-                <button class="category-button" data-category="music" onclick="categoryClicked(event, 'music')">Music</button>
-                <button class="category-button" data-category="sports" onclick="categoryClicked(event, 'sports')">Sports</button>
+                <button class="category-button" data-category="hotels" onclick="categoryClicked(event, 'hotels')">Hotels</button>
+                <button class="category-button" data-category="restaurants" onclick="categoryClicked(event, 'restaurants')">Restaurants</button>
                 <button class="category-button" data-category="travel" onclick="categoryClicked(event, 'travel')">Travel</button>
+                <button class="category-button" data-category="books" onclick="categoryClicked(event, 'books')">Books</button>
             </div>
         </nav>
+
+        <h2>Ivy Search</h2>
+        <nav>
+            <div class="category-buttons">
+                <button class="category-button" data-category="upenn" onclick="categoryClicked(event, 'upenn')">UPenn</button>
+                <button class="category-button" data-category="brown" onclick="categoryClicked(event, 'brown')">Brown</button>
+            </div>
+        </nav>
+
+
 
         <h2>Search Results:</h2>
         <div id="search-results-message"></div>
@@ -47,7 +57,7 @@
 
     </main>
     <footer>
-        <p>&copy; 2023 Simple Search Engine. All rights reserved.</p>
+        <p>&copy; 2023 Googel Engine. All rights reserved.</p>
     </footer>
 </body>
 </html>
