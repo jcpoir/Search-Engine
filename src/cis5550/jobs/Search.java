@@ -34,7 +34,7 @@ import cis5550.webserver.Server;
 public class Search {
 	
 	static double pagerank_weight = 0.05; static double tf_idf_weight = 0.95; static double stopword_penalty = 0.05;
-	static double URL_bonus = 0.1; static int n_results = 200;
+	static double URL_bonus = 5.0; static int n_results = 200;
 	static Stemmer stemmer; static String delimiter1 = "\\^"; static String delimiter2 = "~"; 
 	public static double N = -1; public static int df = -1; public static double n_words = -1;
 	static boolean ignore_stopwords = true;
@@ -90,7 +90,7 @@ public class Search {
 		Set<String> URLs = new HashSet<String>();
 		
 		for (String word : words) {
-			byte[] result = kvs.get("index1000", word, "url"); if (Objects.isNull(result)) {continue;}
+			byte[] result = kvs.get("index5000", word, "url"); if (Objects.isNull(result)) {continue;}
 			String[] new_urls = new String(result).split(delimiter2);
 			URLs.addAll(Arrays.asList(new_urls));
 		}
