@@ -30,8 +30,8 @@ import java.io.IOException;
 
 public class Indexer {
 	
-	static Stemmer stemmer; public static int MAX_WORD_LEN = 20; public static int MAX_PAGE_LEN = 10000; public static int MAX_URL_LEN = 100;
-	static String delimiter1 = "^"; static String delimiter2 = "~"; public static boolean load_index = true;
+	static Stemmer stemmer; public static int MAX_WORD_LEN = 20; public static int MAX_PAGE_LEN = 15000; public static int MAX_URL_LEN = 100;
+	static String delimiter1 = "^"; static String delimiter2 = "~"; public static boolean load_index = false; public static int interval = 500;
 	
 	static Set<String> skips = new HashSet<String> (Arrays.asList(
 			"http", "https", "com", "net", "edu", "org", "gov", "www", "xml", "ttl", "xmlj","rdf"
@@ -197,11 +197,50 @@ public class Indexer {
 		
 		Iterator<Row> persistent = kvs.scan(persistent_name);
 		
+		System.out.println("\n== Loading Existing Index ==\n");
+		
+		int i = 0;
+		
 		while(persistent.hasNext()) {
+			i++;
+			System.out.println(i); 
 			
 			Row row = persistent.next();
 			kvs.putRow(memory_name, row);
 		}
+	}
+	
+	public static void deposit(String intervalTabName, String indexTabName, KVSClient kvs) throws FileNotFoundException, IOException {
+		
+		Iterator<Row> rows = kvs.scan(intervalTabName);
+		
+		System.out.println("IntervalTabName: " + intervalTabName + " IndexTabName: " + indexTabName);
+		
+		while (rows.hasNext()) {
+			try {
+				Row row = rows.next();
+				
+				byte[] url_byte = kvs.get(indexTabName, row.key(), "url"); String url = "";
+				if (!Objects.isNull(url_byte)) {url = new String(url_byte);}
+				
+				kvs.put(indexTabName, row.key(), "url", row.get("url") + delimiter2 + url);}
+			catch (Exception e) {}
+		}
+	}
+	
+	public static Map<String,String> get_pageranks(KVSClient kvs) throws FileNotFoundException, IOException {
+		
+		Map<String,String> out = new HashMap<String,String>();
+		
+		Iterator<Row> rows = kvs.scan("pageranks");
+		
+		int i = 0;
+		while(rows.hasNext()) {
+			i++; System.out.println("Pagerank load: " + i);
+			Row row = rows.next(); out.put(row.key(), new String(row.get("rank")));
+		}
+		
+		return out;
 	}
 	
 	public static void run(FlameContext ctx, String[] url_arg) throws Exception {
@@ -211,22 +250,34 @@ public class Indexer {
 		
 		// load existing index
 		String prevIndexName = "index_old"; String indexTabName = "index_temp"; String outTabName = "index";
+		kvs.delete("index_temp");
+		
 		if (load_index) {load_from_persistent(prevIndexName, indexTabName, kvs);}
 
 		// Get rows of the crawl table, which contains page data
 		String prevCrawlName = "crawl_old"; Iterator<Row> crawl = kvs.scan("crawl");
 		
-		int i = 1;
-
+		int i = 1; int startRow = 0; int endRow = interval; String intervalTabName = indexTabName + String.valueOf(endRow);
+		
+		Map<String,String> pageranks = get_pageranks(kvs);
+		
 		// Iterate through webpages in crawl
 		while (crawl.hasNext()) {
 
 			// extract page data, url
 			Row row = crawl.next(); String page = row.get("page"); String url = row.get("url");
 			
+			if (i > endRow) {
+				System.out.println("\n== COMBINING TABLES ==\n");
+				endRow = endRow + interval;
+				deposit(intervalTabName, indexTabName, kvs);
+				kvs.delete(intervalTabName);
+				intervalTabName = indexTabName + String.valueOf(endRow);
+			}
+			
 			System.out.print("(" + i + ") " + url); i++;
 			
-			if (!Objects.isNull(kvs.get(prevCrawlName, Hasher.hash(url), "url")) | Objects.isNull(page) | Objects.isNull(url) | Objects.isNull(EnglishFilter.filter(url))) {System.out.println("[✗]"); continue;}
+			if (Objects.isNull(page) | Objects.isNull(url) | Objects.isNull(EnglishFilter.filter(url))) {System.out.println("[✗]"); continue;}
 			if (url.length() > MAX_URL_LEN) {System.out.println("[✗]"); continue;}
 			if (page.length() > MAX_PAGE_LEN) {page = page.substring(0, MAX_PAGE_LEN);}
 			
@@ -239,6 +290,9 @@ public class Indexer {
 
 			// add a dummy "word" for deterimining document length
 			List<Integer> dummy_pos = new LinkedList<Integer>();
+			
+			String pagerank = "0.1";
+			if (pageranks.containsKey(url)) {pagerank = pageranks.get(url);}
 
 			// add the current url under each word in the index table
 			for (Entry<String, List<Integer>> entry : words.entrySet()) {
@@ -247,18 +301,24 @@ public class Indexer {
 				String word = entry.getKey(); List<Integer> pos = entry.getValue();
 				
 				if (word.length() > MAX_WORD_LEN | skips.contains(word)) {continue;}
-
+				
 				// assemble a string of word positions, later add to the end of the URL to be indexed
-				String pos_string = delimiter1 + pos.size() + " ";
+				String pos_string = pos.size() + " ";
 
 				for (int p : pos) {pos_string = pos_string + p + " ";}
+				
+				/*
+				 * Get & add pagerank
+				 */
+				
+				pos_string = "^" + pagerank + " " + pos_string;
 
 				stemmer = new Stemmer(); stemmer.add(word.toCharArray(), word.length()); stemmer.stem(); String stem_word = stemmer.toString();
 
 				// System.out.println(word + "(" + word.length() + ") => " + stem_word + "(" + stem_word.length() + ") (STEM) ");
 
-				byte[] curr = kvs.get(indexTabName, word, "url");
-				byte[] curr_stem = kvs.get(indexTabName, stemmer.toString(), "url");
+				byte[] curr = kvs.get(intervalTabName, word, "url");
+				byte[] curr_stem = kvs.get(intervalTabName, stemmer.toString(), "url");
 
 				/*
 				 * NORMAL
@@ -267,22 +327,25 @@ public class Indexer {
 				String mod_url = url + pos_string;
 
 				// if entry for word exists in the table, append new url
-				if (!Objects.isNull(curr)) {kvs.put(indexTabName, word, "url", new String(curr) + delimiter2 + mod_url);}
+				if (!Objects.isNull(curr)) {kvs.put(intervalTabName, word, "url", new String(curr) + delimiter2 + mod_url);}
 
 				// otherwise, start a new entry with the current url
-				else {kvs.put(indexTabName, word, "url", mod_url);}
+				else {kvs.put(intervalTabName, word, "url", mod_url);}
 
 				/*
 				 * STEMMED
 				 */
 
 				// if entry for word exists in the table, append new url
-				if (!Objects.isNull(curr_stem)) {kvs.put(indexTabName, stem_word, "url", new String(curr_stem) + delimiter2 + mod_url);}
+				if (!Objects.isNull(curr_stem)) {kvs.put(intervalTabName, stem_word, "url", new String(curr_stem) + delimiter2 + mod_url);}
 
 				// otherwise, start a new entry with the current url
-				else {kvs.put(indexTabName, stem_word, "url", mod_url);}
+				else {kvs.put(intervalTabName, stem_word, "url", mod_url);}
 			}		
 		}
+		
+		deposit(intervalTabName, indexTabName, kvs);
+		kvs.delete(intervalTabName);
 		
 		kvs.persist(outTabName);
 		
@@ -292,5 +355,7 @@ public class Indexer {
 			Row row = indices.next();
 			kvs.putRow(outTabName, row);
 		}
+		
+		ctx.output("OK");
 	}
 }
